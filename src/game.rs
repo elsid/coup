@@ -106,13 +106,13 @@ pub fn get_available_actions(player: usize, players: &[OpponentView], blockers: 
                             action_type: ActionType::Complete,
                         });
                     }
-                    ActionType::Assassinate(..) => {
+                    ActionType::Assassinate(assassinate_target) => {
+                        actions.push(Action {
+                            player: *assassinate_target,
+                            action_type: ActionType::BlockAssassination,
+                        });
                         for i in 0..players.len() {
                             if i != *target && players[i].hand > 0 {
-                                actions.push(Action {
-                                    player: i,
-                                    action_type: ActionType::BlockAssassination,
-                                });
                                 actions.push(Action {
                                     player: i,
                                     action_type: ActionType::Challenge,
@@ -124,15 +124,15 @@ pub fn get_available_actions(player: usize, players: &[OpponentView], blockers: 
                             action_type: ActionType::Complete,
                         });
                     }
-                    ActionType::Steal(..) => {
+                    ActionType::Steal(steal_target) => {
+                        for card in &STEAL_BLOCKERS {
+                            actions.push(Action {
+                                player: *steal_target,
+                                action_type: ActionType::BlockSteal(*card),
+                            });
+                        }
                         for i in 0..players.len() {
                             if i != *target && players[i].hand > 0 {
-                                for card in &STEAL_BLOCKERS {
-                                    actions.push(Action {
-                                        player: i,
-                                        action_type: ActionType::BlockSteal(*card),
-                                    });
-                                }
                                 actions.push(Action {
                                     player: i,
                                     action_type: ActionType::Challenge,
@@ -557,9 +557,16 @@ impl Game {
         if !matches!(card, Card::Ambassador | Card::Captain) {
             return Err(format!("Require ambassador or captain card: {:?}", card));
         }
-        if let Some(Blocker::Counteraction { source, .. }) = self.blockers.last_mut() {
+        if let Some(Blocker::Counteraction { source, action_type, .. }) = self.blockers.last_mut() {
             if source.is_some() {
                 return Err(String::from("Require counteraction without source"));
+            }
+            if let ActionType::Steal(target) = action_type {
+                if *target != player {
+                    return Err(String::from("Only target player can block steal"));
+                }
+            } else {
+                return Err(String::from("Block steal can be applied only to steal action"));
             }
             *source = Some(player);
         } else {
@@ -577,9 +584,16 @@ impl Game {
         if player == self.player {
             return Err(format!("Require action for not player: {}", self.player));
         }
-        if let Some(Blocker::Counteraction { source, .. }) = self.blockers.last_mut() {
+        if let Some(Blocker::Counteraction { source, action_type, .. }) = self.blockers.last_mut() {
             if source.is_some() {
                 return Err(String::from("Require counteraction without source"));
+            }
+            if let ActionType::Assassinate(target) = action_type {
+                if *target != player {
+                    return Err(String::from("Only target player can block assassination"));
+                }
+            } else {
+                return Err(String::from("Block assassination can be applied only to assassinate action"));
             }
             *source = Some(player);
         } else {
@@ -1684,6 +1698,27 @@ mod tests {
     }
 
     #[test]
+    fn block_steal_should_fail_for_non_targeted_player() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        game.players[0].coins = 3;
+        assert_eq!(
+            game.play(&Action {
+                player: 0,
+                action_type: ActionType::Steal(1),
+            }, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            game.play(&Action {
+                player: 2,
+                action_type: ActionType::BlockSteal(Card::Captain),
+            }, &mut rng),
+            Err(String::from("Only target player can block steal"))
+        );
+    }
+
+    #[test]
     fn successful_challenged_block_steal_should_prevent_steal() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
@@ -1898,6 +1933,27 @@ mod tests {
                 source: None,
             },
         ]);
+    }
+
+    #[test]
+    fn block_assassinate_should_fail_for_non_targeted_player() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        game.players[0].coins = 3;
+        assert_eq!(
+            game.play(&Action {
+                player: 0,
+                action_type: ActionType::Assassinate(1),
+            }, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            game.play(&Action {
+                player: 2,
+                action_type: ActionType::BlockAssassination,
+            }, &mut rng),
+            Err(String::from("Only target player can block assassination"))
+        );
     }
 
     #[test]
