@@ -534,9 +534,12 @@ impl Game {
         if player == self.player {
             return Err(format!("Require action for not player: {}", self.player));
         }
-        if let Some(Blocker::Counteraction { source, .. }) = self.blockers.last_mut() {
+        if let Some(Blocker::Counteraction { source, action_type, .. }) = self.blockers.last_mut() {
             if source.is_some() {
                 return Err(String::from("Require counteraction without source"));
+            }
+            if !matches!(action_type, ActionType::ForeignAid) {
+                return Err(String::from("Block foreign aid should be applied to corresponding action"));
             }
             *source = Some(player);
         } else {
@@ -1319,6 +1322,26 @@ mod tests {
                 source: None,
             },
         ]);
+    }
+
+    #[test]
+    fn block_foreign_aid_after_non_foreign_aid_should_fail() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        assert_eq!(
+            game.play(&Action {
+                player: 0,
+                action_type: ActionType::Tax,
+            }, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            game.play(&Action {
+                player: 1,
+                action_type: ActionType::BlockForeignAid,
+            }, &mut rng),
+            Err(String::from("Block foreign aid should be applied to corresponding action"))
+        );
     }
 
     #[test]
