@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 
-use crate::game::{ALL_CARDS, Card, Settings};
+use crate::fsm::Card;
+use crate::game::{ALL_CARDS, Settings};
 use crate::run::{ALL_BOT_TYPES, BotType, run_game_with_bots};
 
 #[derive(Default, Clone)]
@@ -44,7 +45,7 @@ pub fn collect_random_games_stats(seed: u64, number: usize, workers: usize, bot_
                     locked_stats.rounds.push(result.end.round());
                     let winner = result.end.get_winner().unwrap();
                     locked_stats.winner_bot_type.push(worker_bot_types[winner]);
-                    let cards: Vec<Card> = result.begin.get_player_view(winner).cards.iter().map(|v| v.kind).collect();
+                    let cards: Vec<Card> = result.begin.get_player_view(winner).cards.into();
                     locked_stats.winner_initial_cards.push(cards.clone());
                     locked_stats.winner_bot_type_and_initial_cards.push((worker_bot_types[winner], cards));
                 }

@@ -3,42 +3,10 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-pub enum Card {
-    Assassin,
-    Ambassador,
-    Captain,
-    Contessa,
-    Duke,
-}
+use crate::fsm::{Action, ActionType, ASSASSINATION_COST, Card, CARDS_PER_PLAYER, ChallengeState, COUP_COST, MAX_CARDS_TO_EXCHANGE, MAX_COINS, play_action, State, StateType};
 
 pub const ALL_CARDS: [Card; 5] = [Card::Assassin, Card::Ambassador, Card::Captain, Card::Contessa, Card::Duke];
-pub const CARDS_PER_PLAYER: usize = 2;
-pub const MAX_CARDS_TO_EXCHANGE: usize = 2;
-const STEAL_BLOCKERS: [Card; CARDS_PER_PLAYER] = [Card::Ambassador, Card::Captain];
-const ASSASSINATION_COST: usize = 3;
-const COUP_COST: usize = 7;
-const MAX_COINS: usize = 10;
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-struct Player {
-    coins: usize,
-    cards: Vec<PlayerCard>,
-}
-
-impl Player {
-    fn is_active(&self) -> bool {
-        self.cards.iter().any(|v| !v.revealed)
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpponentView {
-    pub coins: usize,
-    pub hand: usize,
-    pub revealed_cards: Vec<Card>,
-}
+pub const INITIAL_COINS: usize = 2;
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize)]
@@ -46,159 +14,217 @@ pub struct PlayerView<'a> {
     pub step: usize,
     pub turn: usize,
     pub round: usize,
-    pub game_player: usize,
     pub player: usize,
     pub coins: usize,
-    pub cards: &'a [PlayerCard],
-    pub players: Vec<OpponentView>,
-    pub blockers: &'a [Blocker],
+    pub cards: &'a [Card],
+    pub state_type: &'a StateType,
+    pub player_coins: &'a [usize],
+    pub player_hands: &'a [usize],
+    pub player_cards: &'a [usize],
+    pub revealed_cards: &'a [Card],
+    pub deck: usize,
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct AnonymousView<'a> {
-    pub player: usize,
-    pub players: Vec<OpponentView>,
-    pub blockers: &'a [Blocker],
+    pub step: usize,
+    pub turn: usize,
+    pub round: usize,
+    pub state_type: &'a StateType,
+    pub player_coins: &'a [usize],
+    pub player_hands: &'a [usize],
+    pub player_cards: &'a [usize],
+    pub revealed_cards: &'a [Card],
+    pub deck: usize,
 }
 
-pub fn get_available_actions(player: usize, players: &[OpponentView], blockers: &[Blocker]) -> Vec<Action> {
-    let mut actions: Vec<Action> = Vec::new();
-    if blockers.is_empty() {
-        if players[player].coins >= MAX_COINS {
-            for i in 0..players.len() {
-                if i != player && players[i].hand > 0 {
-                    actions.push(Action { player, action_type: ActionType::Coup(i) });
-                }
-            }
-        } else {
-            let action_types = [ActionType::Income, ActionType::ForeignAid, ActionType::Tax, ActionType::Exchange];
-            for action_type in action_types.iter().cloned() {
-                actions.push(Action { player, action_type });
-            }
-            for i in 0..players.len() {
-                if i != player && players[i].hand > 0 {
-                    actions.push(Action { player, action_type: ActionType::Steal(i) });
-                    if players[player].coins >= ASSASSINATION_COST {
-                        actions.push(Action { player, action_type: ActionType::Assassinate(i) });
-                    }
-                    if players[player].coins >= COUP_COST {
-                        actions.push(Action { player, action_type: ActionType::Coup(i) });
-                    }
-                }
+pub fn get_available_actions(state_type: &StateType, player_coins: &[usize], player_hands: &[usize]) -> Vec<Action> {
+    match state_type {
+        StateType::Turn { player } => {
+            get_turn_available_actions(*player, player_coins, player_hands)
+        }
+        StateType::ForeignAid { player } => {
+            get_foreign_aid_available_actions(*player, player_hands)
+        }
+        StateType::Tax { player }
+        | StateType::Exchange { player }
+        | StateType::BlockForeignAid { player, .. }
+        | StateType::BlockSteal { player, .. }
+        | StateType::BlockAssassination { player, .. } => {
+            get_non_blocking_available_actions(*player, player_hands)
+        }
+        StateType::Assassination { player, target, can_challenge } => {
+            get_assassination_available_actions(*player, *target, *can_challenge, player_hands)
+        }
+        StateType::Steal { player, target, can_challenge } => {
+            get_steal_available_actions(*player, *target, *can_challenge, player_hands)
+        }
+        StateType::Challenge { state, .. } => get_challenge_available_actions(state),
+        StateType::NeedCards { player, .. } => get_need_cards_available_actions(*player),
+        StateType::TookCards { player, .. }
+        | StateType::DroppedCard { player, .. } => {
+            get_drop_card_actions(*player)
+        }
+        StateType::LostInfluence { player, .. } => {
+            get_lost_influence_available_actions(*player)
+        }
+    }
+}
+
+pub fn get_turn_available_actions(player: usize, player_coins: &[usize], player_hands: &[usize]) -> Vec<Action> {
+    if player_coins[player] >= MAX_COINS {
+        let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
+        for other_player in 0..player_hands.len() {
+            if other_player != player && player_hands[other_player] > 0 {
+                actions.push(Action { player, action_type: ActionType::Coup(other_player) });
             }
         }
-    } else {
-        match blockers.last().unwrap() {
-            Blocker::Counteraction { action_type, target, .. } => {
-                match action_type {
-                    ActionType::ForeignAid => {
-                        for i in 0..players.len() {
-                            if i != *target && players[i].hand > 0 {
-                                actions.push(Action {
-                                    player: i,
-                                    action_type: ActionType::BlockForeignAid,
-                                });
-                            }
-                        }
-                        actions.push(Action {
-                            player: *target,
-                            action_type: ActionType::Complete,
-                        });
-                    }
-                    ActionType::Assassinate(assassinate_target) => {
-                        actions.push(Action {
-                            player: *assassinate_target,
-                            action_type: ActionType::BlockAssassination,
-                        });
-                        for i in 0..players.len() {
-                            if i != *target && players[i].hand > 0 {
-                                actions.push(Action {
-                                    player: i,
-                                    action_type: ActionType::Challenge,
-                                });
-                            }
-                        }
-                        actions.push(Action {
-                            player: *target,
-                            action_type: ActionType::Complete,
-                        });
-                    }
-                    ActionType::Steal(steal_target) => {
-                        for card in &STEAL_BLOCKERS {
-                            actions.push(Action {
-                                player: *steal_target,
-                                action_type: ActionType::BlockSteal(*card),
-                            });
-                        }
-                        for i in 0..players.len() {
-                            if i != *target && players[i].hand > 0 {
-                                actions.push(Action {
-                                    player: i,
-                                    action_type: ActionType::Challenge,
-                                });
-                            }
-                        }
-                        actions.push(Action {
-                            player: *target,
-                            action_type: ActionType::Complete,
-                        });
-                    }
-                    ActionType::Tax | ActionType::Exchange | ActionType::BlockForeignAid
-                    | ActionType::BlockAssassination | ActionType::BlockSteal(..) => {
-                        for i in 0..players.len() {
-                            if i != *target && players[i].hand > 0 {
-                                actions.push(Action {
-                                    player: i,
-                                    action_type: ActionType::Challenge,
-                                });
-                            }
-                        }
-                        actions.push(Action {
-                            player: *target,
-                            action_type: ActionType::Complete,
-                        });
-                    }
-                    _ => (),
-                }
+        return actions;
+    }
+    let action_types = [ActionType::Income, ActionType::ForeignAid, ActionType::Tax, ActionType::Exchange];
+    let mut actions: Vec<Action> = Vec::with_capacity(action_types.len() + 3 * (player_hands.len() - 1));
+    for action_type in action_types.iter().cloned() {
+        actions.push(Action { player, action_type });
+    }
+    for other_player in 0..player_hands.len() {
+        if other_player != player && player_hands[other_player] > 0 {
+            actions.push(Action { player, action_type: ActionType::Steal(other_player) });
+            if player_coins[player] >= ASSASSINATION_COST {
+                actions.push(Action { player, action_type: ActionType::Assassinate(other_player) });
             }
-            Blocker::Challenge { card, target, .. } => {
-                actions.push(Action {
-                    player: *target,
-                    action_type: ActionType::ShowCard(*card),
-                });
-                for card in &ALL_CARDS {
-                    actions.push(Action {
-                        player: *target,
-                        action_type: ActionType::RevealCard(*card),
-                    });
-                }
-            }
-            Blocker::RevealCard { target } => {
-                for card in &ALL_CARDS {
-                    actions.push(Action {
-                        player: *target,
-                        action_type: ActionType::RevealCard(*card),
-                    });
-                }
-            }
-            Blocker::DropCard { target } => {
-                for card in &ALL_CARDS {
-                    actions.push(Action {
-                        player: *target,
-                        action_type: ActionType::DropCard(*card),
-                    });
-                }
+            if player_coins[player] >= COUP_COST {
+                actions.push(Action { player, action_type: ActionType::Coup(other_player) });
             }
         }
     }
     actions
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct PlayerCard {
-    pub kind: Card,
-    pub revealed: bool,
+pub fn get_foreign_aid_available_actions(player: usize, player_hands: &[usize]) -> Vec<Action> {
+    let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
+    fill_actions(&ActionType::BlockForeignAid, player, player_hands, &mut actions);
+    actions.push(Action { player, action_type: ActionType::PassBlock });
+    actions
+}
+
+pub fn get_non_blocking_available_actions(player: usize, player_hands: &[usize]) -> Vec<Action> {
+    let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
+    fill_challenge_actions(player, player_hands, &mut actions);
+    actions.push(Action { player, action_type: ActionType::PassChallenge });
+    actions
+}
+
+pub fn get_assassination_available_actions(player: usize, target: usize, can_challenge: bool, player_hands: &[usize]) -> Vec<Action> {
+    if can_challenge {
+        let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
+        fill_challenge_actions(player, player_hands, &mut actions);
+        actions.push(Action { player, action_type: ActionType::PassChallenge });
+        actions
+    } else {
+        let mut actions = if player_hands[target] > 0 {
+            let mut actions: Vec<Action> = Vec::with_capacity(2);
+            actions.push(Action { player: target, action_type: ActionType::BlockAssassination });
+            actions
+        } else {
+            Vec::with_capacity(1)
+        };
+        actions.push(Action { player, action_type: ActionType::PassBlock });
+        actions
+    }
+}
+
+pub fn get_steal_available_actions(player: usize, target: usize, can_challenge: bool, player_hands: &[usize]) -> Vec<Action> {
+    if can_challenge {
+        let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
+        fill_challenge_actions(player, player_hands, &mut actions);
+        actions.push(Action { player, action_type: ActionType::PassChallenge });
+        actions
+    } else {
+        let mut actions = if player_hands[target] > 0 {
+            let mut actions: Vec<Action> = Vec::with_capacity(3);
+            actions.push(Action { player: target, action_type: ActionType::BlockSteal(Card::Ambassador) });
+            actions.push(Action { player: target, action_type: ActionType::BlockSteal(Card::Captain) });
+            actions
+        } else {
+            Vec::with_capacity(1)
+        };
+        actions.push(Action { player, action_type: ActionType::PassBlock });
+        actions
+    }
+}
+
+pub fn get_challenge_available_actions(state: &ChallengeState) -> Vec<Action> {
+    match state {
+        ChallengeState::Initial { target, card, .. } => {
+            let mut actions: Vec<Action> = Vec::with_capacity(ALL_CARDS.len() + 1);
+            actions.push(Action {
+                player: *target,
+                action_type: ActionType::ShowCard(*card),
+            });
+            for other_card in &ALL_CARDS {
+                actions.push(Action {
+                    player: *target,
+                    action_type: ActionType::RevealCard(*other_card),
+                });
+            }
+            actions
+        }
+        ChallengeState::ShownCard { initiator, .. } => {
+            let mut actions: Vec<Action> = Vec::with_capacity(ALL_CARDS.len());
+            for card in &ALL_CARDS {
+                actions.push(Action {
+                    player: *initiator,
+                    action_type: ActionType::RevealCard(*card),
+                });
+            }
+            actions
+        }
+        ChallengeState::InitiatorRevealedCard { target } => {
+            vec![Action { player: *target, action_type: ActionType::ShuffleDeck }]
+        }
+        ChallengeState::DeckShuffled { target } => {
+            vec![Action { player: *target, action_type: ActionType::TakeCard }]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn get_need_cards_available_actions(player: usize) -> Vec<Action> {
+    vec![Action { player, action_type: ActionType::TakeCard }]
+}
+
+fn get_drop_card_actions(player: usize) -> Vec<Action> {
+    let mut actions: Vec<Action> = Vec::with_capacity(ALL_CARDS.len());
+    for card in &ALL_CARDS {
+        actions.push(Action { player, action_type: ActionType::DropCard(*card) });
+    }
+    actions
+}
+
+fn get_lost_influence_available_actions(player: usize) -> Vec<Action> {
+    let mut actions: Vec<Action> = Vec::with_capacity(ALL_CARDS.len());
+    for card in &ALL_CARDS {
+        actions.push(Action { player, action_type: ActionType::RevealCard(*card) });
+    }
+    actions
+}
+
+fn fill_challenge_actions(target: usize, player_hands: &[usize], actions: &mut Vec<Action>) {
+    fill_actions(&ActionType::Challenge, target, player_hands, actions);
+}
+
+fn fill_actions(action_type: &ActionType, target: usize, player_hands: &[usize], actions: &mut Vec<Action>) {
+    for player in target + 1..player_hands.len() {
+        if player_hands[player] > 0 {
+            actions.push(Action { player, action_type: action_type.clone() });
+        }
+    }
+    for player in 0..target {
+        if player_hands[player] > 0 {
+            actions.push(Action { player, action_type: action_type.clone() });
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,55 +238,14 @@ pub struct Game {
     step: usize,
     turn: usize,
     round: usize,
-    players: Vec<Player>,
-    deck: Vec<Card>,
     player: usize,
-    blockers: Vec<Blocker>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Action {
-    pub player: usize,
-    pub action_type: ActionType,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ActionType {
-    Income,
-    ForeignAid,
-    Coup(usize),
-    Tax,
-    Assassinate(usize),
-    Exchange,
-    Steal(usize),
-    BlockForeignAid,
-    BlockAssassination,
-    BlockSteal(Card),
-    Complete,
-    Challenge,
-    ShowCard(Card),
-    RevealCard(Card),
-    DropCard(Card),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum Blocker {
-    Counteraction {
-        action_type: ActionType,
-        target: usize,
-        source: Option<usize>,
-    },
-    Challenge {
-        target: usize,
-        source: usize,
-        card: Card,
-    },
-    RevealCard {
-        target: usize,
-    },
-    DropCard {
-        target: usize,
-    },
+    state_type: StateType,
+    player_coins: Vec<usize>,
+    player_hands: Vec<usize>,
+    player_cards_counter: Vec<usize>,
+    player_cards: Vec<Vec<Card>>,
+    revealed_cards: Vec<Card>,
+    deck: Vec<Card>,
 }
 
 pub fn make_deck(cards_per_type: usize) -> Vec<Card> {
@@ -277,44 +262,52 @@ impl Game {
     pub fn new<R: Rng>(settings: Settings, rng: &mut R) -> Self {
         let mut deck = make_deck(settings.cards_per_type);
         deck.shuffle(rng);
-        let mut players: Vec<Player> = std::iter::repeat(Player {
-            coins: 2,
-            cards: Vec::new(),
-        }).take(settings.players_number).collect();
+        let deck_size = deck.len() - CARDS_PER_PLAYER * settings.players_number;
+        let max_player_cards = CARDS_PER_PLAYER + MAX_CARDS_TO_EXCHANGE.min(deck_size);
+        let mut player_cards: Vec<Vec<Card>> = (0..settings.players_number)
+            .map(|_| Vec::with_capacity(max_player_cards))
+            .take(settings.players_number)
+            .collect();
         for _ in 0..CARDS_PER_PLAYER {
-            for player in players.iter_mut() {
-                player.cards.push(PlayerCard {
-                    kind: deck.pop().unwrap(),
-                    revealed: false,
-                });
+            for player_cards in player_cards.iter_mut() {
+                player_cards.push(deck.pop().unwrap());
             }
+        }
+        for player_cards in player_cards.iter_mut() {
+            player_cards.sort();
         }
         Self {
             step: 0,
             turn: 0,
             round: 0,
-            players,
-            deck,
             player: 0,
-            blockers: Vec::new(),
+            state_type: StateType::Turn { player: 0 },
+            player_coins: std::iter::repeat(INITIAL_COINS).take(settings.players_number).collect(),
+            player_hands: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
+            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
+            player_cards,
+            revealed_cards: Vec::with_capacity(settings.cards_per_type * ALL_CARDS.len()),
+            deck,
         }
     }
 
     #[cfg(test)]
-    pub fn custom(players: Vec<Vec<Card>>, deck: Vec<Card>) -> Self {
+    pub fn custom(mut player_cards: Vec<Vec<Card>>, deck: Vec<Card>) -> Self {
+        for player_cards in player_cards.iter_mut() {
+            player_cards.sort();
+        }
         Self {
             step: 0,
             turn: 0,
             round: 0,
-            players: players.into_iter()
-                .map(|cards| Player {
-                    coins: 2,
-                    cards: cards.into_iter().map(|kind| PlayerCard { kind, revealed: false }).collect(),
-                })
-                .collect(),
-            deck,
             player: 0,
-            blockers: Vec::new(),
+            state_type: StateType::Turn { player: 0 },
+            player_coins: std::iter::repeat(INITIAL_COINS).take(player_cards.len()).collect(),
+            player_hands: std::iter::repeat(CARDS_PER_PLAYER).take(player_cards.len()).collect(),
+            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER).take(player_cards.len()).collect(),
+            revealed_cards: Vec::with_capacity(CARDS_PER_PLAYER * player_cards.len() + deck.len()),
+            player_cards,
+            deck,
         }
     }
 
@@ -332,63 +325,47 @@ impl Game {
 
     pub fn get_anonymous_view(&self) -> AnonymousView {
         AnonymousView {
-            player: self.player,
-            players: self.players.iter()
-                .map(|player| OpponentView {
-                    coins: player.coins,
-                    hand: player.cards.iter()
-                        .filter(|card| !card.revealed)
-                        .count(),
-                    revealed_cards: player.cards.iter()
-                        .filter(|card| card.revealed)
-                        .map(|card| card.kind)
-                        .collect(),
-                })
-                .collect(),
-            blockers: &self.blockers,
+            step: self.step,
+            turn: self.turn,
+            round: self.round,
+            state_type: &self.state_type,
+            player_coins: &self.player_coins,
+            player_hands: &self.player_hands,
+            player_cards: &self.player_cards_counter,
+            revealed_cards: &self.revealed_cards,
+            deck: self.deck.len(),
         }
     }
 
-    pub fn get_player_view(&self, index: usize) -> PlayerView {
-        let player = &self.players[index];
+    pub fn get_player_view(&self, player: usize) -> PlayerView {
         PlayerView {
             step: self.step,
             turn: self.turn,
             round: self.round,
-            game_player: self.player,
-            player: index,
-            coins: player.coins,
-            cards: &player.cards,
-            players: self.players.iter()
-                .map(|player| OpponentView {
-                    coins: player.coins,
-                    hand: player.cards.iter()
-                        .filter(|card| !card.revealed)
-                        .count(),
-                    revealed_cards: player.cards.iter()
-                        .filter(|card| card.revealed)
-                        .map(|card| card.kind)
-                        .collect(),
-                })
-                .collect(),
-            blockers: &self.blockers,
+            player,
+            coins: self.player_coins[player],
+            cards: &self.player_cards[player],
+            state_type: &self.state_type,
+            player_coins: &self.player_coins,
+            player_hands: &self.player_hands,
+            player_cards: &self.player_cards_counter,
+            revealed_cards: &self.revealed_cards,
+            deck: self.deck.len(),
         }
     }
 
     pub fn is_player_active(&self, index: usize) -> bool {
-        self.players[index].is_active()
+        self.player_hands[index] > 0
     }
 
     pub fn is_done(&self) -> bool {
-        self.players.iter()
-            .filter(|player| player.cards.iter().any(|card| !card.revealed))
-            .count() <= 1
+        self.player_hands.iter().filter(|hand| **hand > 0).count() <= 1
     }
 
     pub fn get_winner(&self) -> Option<usize> {
         if self.is_done() {
-            self.players.iter()
-                .find_position(|player| player.cards.iter().any(|card| !card.revealed))
+            self.player_hands.iter()
+                .find_position(|hand| **hand > 0)
                 .map(|(index, _)| index)
         } else {
             None
@@ -396,393 +373,27 @@ impl Game {
     }
 
     pub fn play<R: Rng>(&mut self, action: &Action, rng: &mut R) -> Result<(), String> {
-        let player = self.player;
-        let result = match &action.action_type {
-            ActionType::Income => self.income(action.player),
-            ActionType::ForeignAid | ActionType::Tax | ActionType::Exchange => self.action_without_target(&action.action_type, action.player),
-            ActionType::Coup(target) => self.coup(action.player, *target),
-            ActionType::Assassinate(target) => self.assassinate(action.player, *target),
-            ActionType::Steal(target) => self.steal(action.player, *target),
-            ActionType::BlockForeignAid => self.block_foreign_aid(action.player),
-            ActionType::BlockSteal(card) => self.block_steal(action.player, *card),
-            ActionType::BlockAssassination => self.block_assassination(action.player),
-            ActionType::Complete => self.complete(action.player),
-            ActionType::Challenge => self.challenge(action.player),
-            ActionType::ShowCard(card) => self.show_card(action.player, *card, rng),
-            ActionType::RevealCard(card) => self.reveal_card(action.player, *card),
-            ActionType::DropCard(card) => self.drop_card(action.player, *card),
+        let mut state = State {
+            state_type: &mut self.state_type,
+            player_coins: &mut self.player_coins,
+            player_hands: &mut self.player_hands,
+            player_cards_counter: &mut self.player_cards_counter,
+            player_cards: &mut self.player_cards,
+            deck: &mut self.deck,
+            revealed_cards: &mut self.revealed_cards,
         };
-        if matches!(result, Ok(..)) {
-            self.step += 1;
-            if player != self.player {
-                self.turn += 1;
-                if player > self.player {
-                    self.round += 1;
-                }
+        if let Err(e) = play_action(action, &mut state, rng) {
+            return Err(format!("State machine check is failed: {:?}", e));
+        }
+        self.step += 1;
+        if let StateType::Turn { player } = &self.state_type {
+            self.turn += 1;
+            if self.player >= *player {
+                self.round += 1;
             }
-        }
-        result
-    }
-
-    fn income(&mut self, player: usize) -> Result<(), String> {
-        if player != self.player {
-            return Err(format!("Require action player: {}", self.player));
-        }
-        if !self.blockers.is_empty() {
-            return Err(String::from("Require empty blockers"));
-        }
-        if self.players[player].coins >= MAX_COINS {
-            return Err(format!("Require to do coup with {} coins", MAX_COINS));
-        }
-        self.players[player].coins += 1;
-        self.advance_player();
-        Ok(())
-    }
-
-    fn action_without_target(&mut self, action_type: &ActionType, player: usize) -> Result<(), String> {
-        if player != self.player {
-            return Err(format!("Require action player: {}", self.player));
-        }
-        if !self.blockers.is_empty() {
-            return Err(String::from("Require empty blockers"));
-        }
-        if self.players[player].coins >= MAX_COINS {
-            return Err(format!("Require to do coup with {} coins", MAX_COINS));
-        }
-        self.blockers.push(Blocker::Counteraction {
-            action_type: action_type.clone(),
-            target: player,
-            source: None,
-        });
-        Ok(())
-    }
-
-    fn coup(&mut self, player: usize, target: usize) -> Result<(), String> {
-        if player != self.player {
-            return Err(format!("Require action player: {}", self.player));
-        }
-        if !self.blockers.is_empty() {
-            return Err(String::from("Require empty blockers"));
-        }
-        if player == target {
-            return Err(format!("Require to coup other player"));
-        }
-        if self.players[player].coins < COUP_COST {
-            return Err(format!("Require {} coins for coup: {}", COUP_COST, self.players[player].coins));
-        }
-        if !self.players[target].is_active() {
-            return Err(format!("Require active target player"));
-        }
-        self.players[player].coins -= COUP_COST;
-        self.blockers.push(Blocker::RevealCard { target });
-        Ok(())
-    }
-
-    fn assassinate(&mut self, player: usize, target: usize) -> Result<(), String> {
-        if player != self.player {
-            return Err(format!("Require action player: {}", self.player));
-        }
-        if !self.blockers.is_empty() {
-            return Err(String::from("Require empty blockers"));
-        }
-        if player == target {
-            return Err(format!("Require other player target"));
-        }
-        if !self.players[target].is_active() {
-            return Err(format!("Require active target player"));
-        }
-        if self.players[player].coins < ASSASSINATION_COST {
-            return Err(format!("Require {} coins: {}", ASSASSINATION_COST, self.players[player].coins));
-        }
-        if self.players[player].coins >= MAX_COINS {
-            return Err(format!("Require to do coup with {} coins", MAX_COINS));
-        }
-        self.players[player].coins -= ASSASSINATION_COST;
-        self.blockers.push(Blocker::Counteraction {
-            action_type: ActionType::Assassinate(target),
-            target: player,
-            source: None,
-        });
-        Ok(())
-    }
-
-    fn steal(&mut self, player: usize, target: usize) -> Result<(), String> {
-        if player != self.player {
-            return Err(format!("Require action player: {}", self.player));
-        }
-        if !self.blockers.is_empty() {
-            return Err(String::from("Require empty blockers"));
-        }
-        if player == target {
-            return Err(String::from("Require other player target"));
-        }
-        if !self.players[target].is_active() {
-            return Err(String::from("Require active target player"));
-        }
-        if self.players[player].coins >= MAX_COINS {
-            return Err(format!("Require to do coup with {} coins", MAX_COINS));
-        }
-        self.blockers.push(Blocker::Counteraction {
-            action_type: ActionType::Steal(target),
-            target: player,
-            source: None,
-        });
-        Ok(())
-    }
-
-    fn block_foreign_aid(&mut self, player: usize) -> Result<(), String> {
-        if player == self.player {
-            return Err(format!("Require action for not player: {}", self.player));
-        }
-        if let Some(Blocker::Counteraction { source, action_type, .. }) = self.blockers.last_mut() {
-            if source.is_some() {
-                return Err(String::from("Require counteraction without source"));
-            }
-            if !matches!(action_type, ActionType::ForeignAid) {
-                return Err(String::from("Block foreign aid should be applied to corresponding action"));
-            }
-            *source = Some(player);
-        } else {
-            return Err(String::from("Require counteraction last blocker"));
-        }
-        self.blockers.push(Blocker::Counteraction {
-            action_type: ActionType::BlockForeignAid,
-            target: player,
-            source: None,
-        });
-        Ok(())
-    }
-
-    fn block_steal(&mut self, player: usize, card: Card) -> Result<(), String> {
-        if player == self.player {
-            return Err(format!("Require action for not player: {}", self.player));
-        }
-        if !matches!(card, Card::Ambassador | Card::Captain) {
-            return Err(format!("Require ambassador or captain card: {:?}", card));
-        }
-        if let Some(Blocker::Counteraction { source, action_type, .. }) = self.blockers.last_mut() {
-            if source.is_some() {
-                return Err(String::from("Require counteraction without source"));
-            }
-            if let ActionType::Steal(target) = action_type {
-                if *target != player {
-                    return Err(String::from("Only target player can block steal"));
-                }
-            } else {
-                return Err(String::from("Block steal can be applied only to steal action"));
-            }
-            *source = Some(player);
-        } else {
-            return Err(String::from("Require counteraction last blocker"));
-        };
-        self.blockers.push(Blocker::Counteraction {
-            action_type: ActionType::BlockSteal(card),
-            target: player,
-            source: None,
-        });
-        Ok(())
-    }
-
-    fn block_assassination(&mut self, player: usize) -> Result<(), String> {
-        if player == self.player {
-            return Err(format!("Require action for not player: {}", self.player));
-        }
-        if let Some(Blocker::Counteraction { source, action_type, .. }) = self.blockers.last_mut() {
-            if source.is_some() {
-                return Err(String::from("Require counteraction without source"));
-            }
-            if let ActionType::Assassinate(target) = action_type {
-                if *target != player {
-                    return Err(String::from("Only target player can block assassination"));
-                }
-            } else {
-                return Err(String::from("Block assassination can be applied only to assassinate action"));
-            }
-            *source = Some(player);
-        } else {
-            return Err(String::from("Require counteraction last blocker"));
-        };
-        self.blockers.push(Blocker::Counteraction {
-            action_type: ActionType::BlockAssassination,
-            target: player,
-            source: None,
-        });
-        Ok(())
-    }
-
-    fn complete(&mut self, player: usize) -> Result<(), String> {
-        if self.blockers.len() < 1 {
-            return Err(String::from("Require at least one blocker"));
-        }
-        let (action_type, target) = if let Some(Blocker::Counteraction { action_type, source: None, target }) = self.blockers.last() {
-            if player != *target {
-                return Err(format!("Require action player matching counteraction target"));
-            }
-            (action_type.clone(), *target)
-        } else {
-            return Err(format!("Require counteraction last blocker without source: {:?}", self.blockers));
-        };
-        self.blockers.pop();
-        while !self.blockers.is_empty() {
-            self.blockers.pop();
-        }
-        self.complete_action(&action_type, target);
-        if self.blockers.is_empty() {
-            self.advance_player();
+            self.player = *player;
         }
         Ok(())
-    }
-
-    fn challenge(&mut self, player: usize) -> Result<(), String> {
-        let (card, target) = if let Some(Blocker::Counteraction { action_type, source, target, .. }) = self.blockers.last_mut() {
-            let card = match action_type {
-                ActionType::BlockForeignAid | ActionType::Tax => Card::Duke,
-                ActionType::BlockSteal(card) => *card,
-                ActionType::BlockAssassination => Card::Contessa,
-                ActionType::Steal(..) => Card::Captain,
-                ActionType::Assassinate(..) => Card::Assassin,
-                ActionType::Exchange => Card::Ambassador,
-                _ => return Err(format!("Card is not defined for action type: {:?}", action_type)),
-            };
-            if source.is_none() {
-                *source = Some(player);
-                (card, *target)
-            } else if *target != player {
-                return Err(format!("Require challenge by player: {}", target));
-            } else {
-                (card, source.unwrap())
-            }
-        } else {
-            return Err(String::from("Require counteraction last blocker"));
-        };
-        self.blockers.push(Blocker::Challenge {
-            target,
-            source: player,
-            card,
-        });
-        Ok(())
-    }
-
-    fn show_card<R: Rng>(&mut self, player: usize, shown_card: Card, rng: &mut R) -> Result<(), String> {
-        let (card_index, winner, loser) = if let Some(Blocker::Challenge { card, target, source }) = self.blockers.last() {
-            if shown_card != *card {
-                return Err(format!("Require shown card: {:?}, got: {:?}", card, shown_card));
-            }
-            if *target != player {
-                return Err(format!("Require action player: {}", target));
-            }
-            if let Some((card_index, _)) = self.players[*target].cards.iter()
-                .find_position(|v| !v.revealed && v.kind == *card) {
-                (card_index, *target, *source)
-            } else {
-                return Err(format!("Require player to have non revealed card: {:?}", shown_card));
-            }
-        } else {
-            return Err(format!("Require challenge last blocker: {:?}", self.blockers));
-        };
-        self.players[winner].cards.remove(card_index);
-        self.deck.push(shown_card);
-        self.deck.shuffle(rng);
-        self.players[winner].cards.push(PlayerCard {
-            kind: self.deck.pop().unwrap(),
-            revealed: false,
-        });
-        *self.blockers.last_mut().unwrap() = Blocker::RevealCard { target: loser };
-        Ok(())
-    }
-
-    fn reveal_card(&mut self, player: usize, card: Card) -> Result<(), String> {
-        if let Some(Blocker::RevealCard { target }) = self.blockers.last() {
-            if *target != player {
-                return Err(format!("Require action player: {}", target));
-            }
-        } else if let Some(Blocker::Challenge { target, .. }) = self.blockers.last() {
-            if *target != player {
-                return Err(format!("Require action player: {}", target));
-            }
-        } else {
-            return Err(format!("Require reveal card or challenge blocker"));
-        }
-        if let Some(player_card) = self.players[player].cards.iter_mut()
-            .find(|v| !v.revealed && v.kind == card) {
-            player_card.revealed = true;
-        } else {
-            return Err(format!("Require player to have non revealed card: {:?}", card));
-        }
-        self.blockers.pop();
-        while !self.blockers.is_empty() {
-            let (action_type, target) = if let Some(Blocker::Counteraction { action_type, target, .. }) = self.blockers.last() {
-                (action_type.clone(), *target)
-            } else {
-                break;
-            };
-            self.blockers.pop();
-            if player != target {
-                self.complete_action(&action_type, target);
-            }
-        }
-        if self.blockers.is_empty() {
-            self.advance_player();
-        }
-        Ok(())
-    }
-
-    fn drop_card(&mut self, player: usize, card: Card) -> Result<(), String> {
-        if let Some(Blocker::DropCard { target }) = self.blockers.last() {
-            if *target != player {
-                return Err(format!("Require action player: {}", target));
-            }
-        } else {
-            return Err(format!("Require drop card blocker"));
-        }
-        let card_index = if let Some((card_index, _)) = self.players[player].cards.iter_mut()
-            .find_position(|v| !v.revealed && v.kind == card) {
-            card_index
-        } else {
-            return Err(format!("Require player to have non revealed card: {:?}", card));
-        };
-        self.blockers.pop();
-        let card = self.players[player].cards.remove(card_index).kind;
-        self.deck.push(card);
-        if self.blockers.is_empty() {
-            self.advance_player();
-        }
-        Ok(())
-    }
-
-    fn complete_action(&mut self, action_type: &ActionType, player: usize) {
-        match action_type {
-            ActionType::ForeignAid => self.players[player].coins += 2,
-            ActionType::Tax => self.players[player].coins += 3,
-            ActionType::Assassinate(target) => {
-                if self.players[*target].is_active() {
-                    self.blockers.push(Blocker::RevealCard { target: *target });
-                }
-            }
-            ActionType::Exchange => {
-                for _ in 0..self.deck.len().min(MAX_CARDS_TO_EXCHANGE) {
-                    self.players[player].cards.push(PlayerCard {
-                        kind: self.deck.pop().unwrap(),
-                        revealed: false,
-                    });
-                    self.blockers.push(Blocker::DropCard {
-                        target: player,
-                    });
-                }
-            }
-            ActionType::Steal(target) => {
-                self.players[player].coins += self.players[*target].coins.min(2);
-                self.players[*target].coins -= self.players[*target].coins.min(2);
-            }
-            _ => (),
-        }
-    }
-
-    fn advance_player(&mut self) {
-        while !self.players[(self.player + 1) % self.players.len()].is_active() {
-            self.player += 1;
-        }
-        self.player = (self.player + 1) % self.players.len();
     }
 
     pub fn print(&self) {
@@ -793,31 +404,27 @@ impl Game {
             println!("    {}) {:?}", i, self.deck[i]);
         }
         let winner = self.get_winner();
-        println!("Players: {}", self.players.len());
-        for i in 0..self.players.len() {
-            let player = &self.players[i];
-            if winner == Some(i) {
+        println!("Players: {}", self.player_cards.len());
+        for player in 0..self.player_cards.len() {
+            if winner == Some(player) {
                 print!("W");
             } else {
                 print!(" ");
             }
-            if i == self.player {
+            if player == self.player {
                 print!("-> ");
             } else {
                 print!("   ");
             }
-            print!("{})", i);
-            if player.is_active() {
+            print!(" {})", player);
+            if self.player_hands[player] > 0 {
                 print!(" + ");
             } else {
                 print!(" - ");
             }
-            println!("{:?}", player);
+            println!("{:?}", self.player_cards[player]);
         }
-        println!("Blockers: {}", self.blockers.len());
-        for i in 0..self.blockers.len() {
-            println!("    {}) {:?}", i, self.blockers[i]);
-        }
+        println!("State: {:?}", self.state_type);
     }
 }
 
@@ -841,7 +448,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 0,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 2,
@@ -864,12 +471,20 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::RevealCard(Card::Ambassador),
         },
         Action {
+            player: 1,
+            action_type: ActionType::ShuffleDeck,
+        },
+        Action {
+            player: 1,
+            action_type: ActionType::TakeCard,
+        },
+        Action {
             player: 3,
             action_type: ActionType::Tax,
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 4,
@@ -888,12 +503,16 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::Steal(3),
         },
         Action {
+            player: 5,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
             player: 3,
             action_type: ActionType::BlockSteal(Card::Ambassador),
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 0,
@@ -901,11 +520,15 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 0,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 1,
             action_type: ActionType::Steal(3),
+        },
+        Action {
+            player: 1,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 3,
@@ -924,12 +547,20 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::RevealCard(Card::Captain),
         },
         Action {
+            player: 3,
+            action_type: ActionType::ShuffleDeck,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::TakeCard,
+        },
+        Action {
             player: 2,
             action_type: ActionType::Tax,
         },
         Action {
             player: 2,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 3,
@@ -937,7 +568,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 4,
@@ -953,7 +588,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 0,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 0,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 3,
@@ -969,7 +608,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 2,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 3,
@@ -977,7 +616,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 4,
@@ -993,7 +636,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 0,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 1,
@@ -1005,7 +648,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 2,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 3,
@@ -1028,6 +671,10 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::Assassinate(2),
         },
         Action {
+            player: 0,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
             player: 2,
             action_type: ActionType::BlockAssassination,
         },
@@ -1040,12 +687,16 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::RevealCard(Card::Duke),
         },
         Action {
+            player: 0,
+            action_type: ActionType::PassBlock,
+        },
+        Action {
             player: 1,
             action_type: ActionType::ForeignAid,
         },
         Action {
             player: 1,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 3,
@@ -1053,7 +704,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 4,
@@ -1061,7 +716,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 4,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 5,
@@ -1069,7 +724,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 5,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 0,
@@ -1077,7 +732,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 0,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 1,
@@ -1085,7 +740,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 1,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 3,
@@ -1093,7 +748,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 4,
@@ -1101,7 +760,7 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 4,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 5,
@@ -1109,11 +768,15 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 5,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 0,
             action_type: ActionType::Assassinate(1),
+        },
+        Action {
+            player: 0,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 1,
@@ -1133,11 +796,19 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 1,
+            action_type: ActionType::ShuffleDeck,
+        },
+        Action {
+            player: 1,
+            action_type: ActionType::TakeCard,
+        },
+        Action {
+            player: 1,
             action_type: ActionType::ForeignAid,
         },
         Action {
             player: 1,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 3,
@@ -1145,7 +816,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 4,
@@ -1153,7 +828,15 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 4,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 4,
+            action_type: ActionType::TakeCard,
+        },
+        Action {
+            player: 4,
+            action_type: ActionType::TakeCard,
         },
         Action {
             player: 4,
@@ -1184,12 +867,20 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::RevealCard(Card::Contessa),
         },
         Action {
+            player: 4,
+            action_type: ActionType::ShuffleDeck,
+        },
+        Action {
+            player: 4,
+            action_type: ActionType::TakeCard,
+        },
+        Action {
             player: 1,
             action_type: ActionType::Tax,
         },
         Action {
             player: 1,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
         },
         Action {
             player: 3,
@@ -1197,7 +888,11 @@ pub fn get_example_actions() -> Vec<Action> {
         },
         Action {
             player: 3,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassChallenge,
+        },
+        Action {
+            player: 3,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 4,
@@ -1216,12 +911,24 @@ pub fn get_example_actions() -> Vec<Action> {
             action_type: ActionType::RevealCard(Card::Duke),
         },
         Action {
+            player: 4,
+            action_type: ActionType::ShuffleDeck,
+        },
+        Action {
+            player: 4,
+            action_type: ActionType::TakeCard,
+        },
+        Action {
+            player: 4,
+            action_type: ActionType::PassBlock,
+        },
+        Action {
             player: 5,
             action_type: ActionType::ForeignAid,
         },
         Action {
             player: 5,
-            action_type: ActionType::Complete,
+            action_type: ActionType::PassBlock,
         },
         Action {
             player: 3,
@@ -1247,6 +954,14 @@ pub fn get_example_actions() -> Vec<Action> {
             player: 3,
             action_type: ActionType::RevealCard(Card::Captain),
         },
+        Action {
+            player: 4,
+            action_type: ActionType::ShuffleDeck,
+        },
+        Action {
+            player: 4,
+            action_type: ActionType::TakeCard,
+        },
     ]
 }
 
@@ -1258,7 +973,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn income_should_add_coin_without_blockers_and_set_next_player() {
+    fn income_should_add_coin_and_start_new_turn() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
         assert_eq!(
@@ -1268,391 +983,155 @@ mod tests {
             }, &mut rng),
             Ok(())
         );
-        assert_eq!(game.players[0].coins, 3);
-        assert_eq!(game.player, 1);
+        assert_eq!(game.player_coins[0], 3);
     }
 
     #[test]
-    fn foreign_aid_should_add_counteraction_blocker() {
+    fn unblocked_foreign_aid_should_add_coins() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::ForeignAid,
-                target: 0,
-                source: None,
-            }
-        ]);
-    }
-
-    #[test]
-    fn block_foreign_aid_should_add_counteraction_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::ForeignAid,
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Counteraction {
-                action_type: ActionType::BlockForeignAid,
-                target: 1,
-                source: None,
-            },
-        ]);
-    }
-
-    #[test]
-    fn block_foreign_aid_after_non_foreign_aid_should_fail() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+            Action {
                 player: 0,
-                action_type: ActionType::Tax,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Err(String::from("Block foreign aid should be applied to corresponding action"))
-        );
+                action_type: ActionType::PassBlock,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins[0], 4);
     }
 
     #[test]
-    fn complete_after_block_foreign_should_remove_blockers_and_set_next_player() {
+    fn blocked_foreign_aid_should_not_add_coins() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.players, vec![
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Ambassador, revealed: false },
-                    PlayerCard { kind: Card::Contessa, revealed: false },
-                ],
+                action_type: ActionType::PassChallenge,
             },
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Captain, revealed: false },
-                    PlayerCard { kind: Card::Duke, revealed: false },
-                ],
-            },
-        ]);
-        assert_eq!(game.player, 1);
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins, vec![2, 2]);
     }
 
     #[test]
-    fn challenge_after_block_foreign_should_add_challenge_blocker() {
+    fn failed_challenge_on_block_foreign_aid_should_fail_foreign_aid() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 0,
                 action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::ForeignAid,
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Counteraction {
-                action_type: ActionType::BlockForeignAid,
-                target: 1,
-                source: Some(0),
-            },
-            Blocker::Challenge {
-                target: 1,
-                source: 0,
-                card: Card::Duke,
-            }
-        ]);
-    }
-
-    #[test]
-    fn show_card_after_challenge_should_replace_challenge_by_reveal_card_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            Action {
                 player: 1,
                 action_type: ActionType::ShowCard(Card::Duke),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::ForeignAid,
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Counteraction {
-                action_type: ActionType::BlockForeignAid,
-                target: 1,
-                source: Some(0),
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(game.player_cards[0][0]),
             },
-            Blocker::RevealCard {
-                target: 0,
-            }
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins, vec![2, 2]);
+        assert_eq!(game.player_cards, vec![
+            vec![Card::Contessa],
+            vec![Card::Assassin, Card::Captain],
         ]);
+        assert_eq!(game.revealed_cards, vec![Card::Ambassador]);
     }
 
     #[test]
-    fn reveal_card_after_reveal_card_should_remove_blockers_and_set_next_player() {
+    fn successful_challenge_for_block_foreign_aid_should_allow_first_aid() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::ShowCard(Card::Duke),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::RevealCard(game.players[0].cards[0].kind),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.players, vec![
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Ambassador, revealed: true },
-                    PlayerCard { kind: Card::Contessa, revealed: false },
-                ],
-            },
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Captain, revealed: false },
-                    PlayerCard { kind: Card::Assassin, revealed: false },
-                ],
-            },
-        ]);
-        assert_eq!(game.player, 1);
-    }
-
-    #[test]
-    fn reveal_card_after_challenge_should_remove_blockers_and_complete_action_and_set_next_player() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::ForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::BlockForeignAid,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 0,
                 action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
-                action_type: ActionType::RevealCard(game.players[1].cards[0].kind),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.players, vec![
-            Player {
-                coins: 4,
-                cards: vec![
-                    PlayerCard { kind: Card::Ambassador, revealed: false },
-                    PlayerCard { kind: Card::Contessa, revealed: false },
-                ],
+                action_type: ActionType::RevealCard(game.player_cards[1][0]),
             },
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Captain, revealed: true },
-                    PlayerCard { kind: Card::Duke, revealed: false },
-                ],
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
             },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins, vec![4, 2]);
+        assert_eq!(game.player_cards, vec![
+            vec![Card::Ambassador, Card::Contessa],
+            vec![Card::Duke],
         ]);
-        assert_eq!(game.player, 1);
+        assert_eq!(game.revealed_cards, vec![Card::Captain]);
     }
 
     #[test]
-    fn complete_after_tax_should_advance_game() {
+    fn unchallenged_tax_should_add_coins() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Tax,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.players[0].coins, 5);
-        assert_eq!(game.player, 1);
-    }
-
-    #[test]
-    fn challenge_after_tax_should_add_challenge() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Tax,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Tax,
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Challenge {
-                target: 0,
-                source: 1,
-                card: Card::Duke,
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
             },
-        ]);
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins[0], 5);
     }
 
     #[test]
-    fn coup_should_subtract_7_coins_and_add_reveal_card_blocker() {
+    fn coup_should_subtract_coins_add_lead_to_lost_influence() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 7;
+        game.player_coins[0] = 7;
         assert_eq!(
             game.play(&Action {
                 player: 0,
@@ -1660,276 +1139,260 @@ mod tests {
             }, &mut rng),
             Ok(())
         );
-        assert_eq!(game.blockers, vec![
-            Blocker::RevealCard {
-                target: 1,
-            },
-        ]);
-        assert_eq!(game.players[0].coins, 0);
+        assert_eq!(game.state_type, StateType::LostInfluence { player: 1, current_player: 0 });
+        assert_eq!(game.player_coins[0], 0);
     }
 
     #[test]
-    fn steal_should_add_counteraction() {
+    fn coup_against_not_active_player_should_return_error() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        game.player_coins[0] = 7;
+        game.player_hands[1] = 0;
+        game.player_cards[1].clear();
         assert_eq!(
             game.play(&Action {
                 player: 0,
-                action_type: ActionType::Steal(1),
+                action_type: ActionType::Coup(1),
             }, &mut rng),
-            Ok(())
+            Err(String::from("State machine check is failed: InvalidTarget"))
         );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Steal(1),
-                target: 0,
-                source: None,
-            },
-        ]);
+        assert_eq!(game.state_type, StateType::Turn { player: 0 });
     }
 
     #[test]
     fn block_steal_after_steal_should_add_counteraction() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Steal(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::BlockSteal(Card::Ambassador),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Steal(1),
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Counteraction {
-                action_type: ActionType::BlockSteal(Card::Ambassador),
-                target: 1,
-                source: None,
-            },
-        ]);
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::BlockSteal { player: 1, target: 0, card: Card::Ambassador });
     }
 
     #[test]
     fn block_steal_should_fail_for_non_targeted_player() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Steal(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
                 player: 2,
                 action_type: ActionType::BlockSteal(Card::Captain),
-            }, &mut rng),
-            Err(String::from("Only target player can block steal"))
+            },
+        ];
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut rng),
+            Err(String::from("State machine check is failed: InvalidTarget"))
         );
+        assert_eq!(game.state_type, StateType::Steal { player: 0, target: 1, can_challenge: false });
     }
 
     #[test]
     fn successful_challenged_block_steal_should_prevent_steal() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[1].cards[0].kind = Card::Ambassador;
-        assert_eq!(
-            game.play(&Action {
+        game.player_cards[1][0] = Card::Ambassador;
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Steal(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::BlockSteal(Card::Ambassador),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 0,
                 action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::ShowCard(Card::Ambassador),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 0,
-                action_type: ActionType::RevealCard(game.players[0].cards[0].kind),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.players[0].coins, 2);
-        assert_eq!(game.players[1].coins, 2);
-        assert_eq!(game.player, 1);
+                action_type: ActionType::RevealCard(game.player_cards[0][0]),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins[0], 2);
+        assert_eq!(game.player_coins[1], 2);
     }
 
     #[test]
-    fn complete_after_steal_should_advance_game() {
+    fn successful_steal_should_transfer_coins_from_target_to_theft() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Steal(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 0,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.players[0].coins, 4);
-        assert_eq!(game.players[1].coins, 0);
-        assert_eq!(game.player, 1);
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins[0], 4);
+        assert_eq!(game.player_coins[1], 0);
     }
 
     #[test]
-    fn challenge_after_steal_should_add_challenge_blocker() {
+    fn successful_steal_challenge_should_prevent_stealing() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[1].coins = 2;
-        assert_eq!(
-            game.play(&Action {
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Steal(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
                 player: 1,
                 action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(game.player_cards[0][0]),
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins[0], 2);
+        assert_eq!(game.player_coins[1], 2);
+    }
+
+    #[test]
+    fn failed_steal_challenge_should_transfer_coins() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        game.player_cards[0][0] = Card::Captain;
+        let actions = [
+            Action {
+                player: 0,
                 action_type: ActionType::Steal(1),
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Challenge {
-                target: 0,
-                source: 1,
-                card: Card::Captain,
-            },
-        ]);
-    }
-
-    #[test]
-    fn assassinate_should_add_counteraction() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Assassinate(1),
-                target: 0,
-                source: None,
-            },
-        ]);
-        assert_eq!(game.players[0].coins, 0);
-    }
-
-    #[test]
-    fn complete_after_assassinate_should_add_reveal_card_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::RevealCard {
-                target: 1,
-            },
-        ]);
-    }
-
-    #[test]
-    fn challenge_after_assassinate_should_add_challenge_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            Action {
                 player: 1,
                 action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Assassinate(1),
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Challenge {
-                target: 0,
-                source: 1,
-                card: Card::Assassin,
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(game.player_cards[0][0]),
             },
-        ]);
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(game.player_cards[1][0]),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_coins[0], 4);
+        assert_eq!(game.player_coins[1], 0);
     }
 
     #[test]
-    fn block_assassinate_after_assassinate_should_add_counteraction() {
+    fn failed_steal_challenge_for_targeted_player_with_one_card_should_transfer_coins() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
+        game.player_cards[0][0] = Card::Captain;
+        game.player_hands[1] = 1;
+        game.player_cards_counter[1] = 1;
+        game.player_cards[1].remove(1);
+        let actions = [
+            Action {
+                player: 0,
+                action_type: ActionType::Steal(1),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(game.player_cards[0][0]),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(game.player_cards[1][0]),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 0 });
+        assert_eq!(game.player_coins[0], 4);
+        assert_eq!(game.player_coins[1], 0);
+        assert_eq!(game.player_hands[1], 0);
+        assert_eq!(game.player_cards_counter[1], 0);
+        assert_eq!(game.player_cards[1], vec![]);
+    }
+
+    #[test]
+    fn assassinate_should_subtract_coins() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        game.player_coins[0] = 3;
         assert_eq!(
             game.play(&Action {
                 player: 0,
@@ -1937,299 +1400,188 @@ mod tests {
             }, &mut rng),
             Ok(())
         );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockAssassination,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Assassinate(1),
-                target: 0,
-                source: Some(1),
-            },
-            Blocker::Counteraction {
-                action_type: ActionType::BlockAssassination,
-                target: 1,
-                source: None,
-            },
-        ]);
+        assert_eq!(game.player_coins[0], 0);
     }
 
     #[test]
     fn block_assassinate_should_fail_for_non_targeted_player() {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
+        game.player_coins[0] = 3;
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
                 player: 2,
                 action_type: ActionType::BlockAssassination,
-            }, &mut rng),
-            Err(String::from("Only target player can block assassination"))
+            },
+        ];
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut rng),
+            Err(String::from("State machine check is failed: InvalidTarget"))
         );
     }
 
     #[test]
-    fn complete_after_block_assassinate_should_advance_game() {
+    fn failed_assassination_challenge_should_end_game_for_targeted_player() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
+        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        game.player_coins[0] = 3;
+        game.player_cards[0][0] = Card::Assassin;
+        let actions = [
+            Action {
                 player: 0,
                 action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockAssassination,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![]);
-        assert_eq!(game.player, 1);
-    }
-
-    #[test]
-    fn challenge_after_block_assassinate_should_add_challenge() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockAssassination,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Assassinate(1),
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Counteraction {
-                action_type: ActionType::BlockAssassination,
-                target: 1,
-                source: Some(0),
-            },
-            Blocker::Challenge {
-                target: 1,
-                source: 0,
-                card: Card::Contessa,
-            },
-        ]);
-    }
-
-    #[test]
-    fn reveal_card_after_challenged_after_block_assassinate_should_add_reveal_card_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        game.players[0].coins = 3;
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Assassinate(1),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::BlockAssassination,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 1,
-                action_type: ActionType::RevealCard(game.players[1].cards[0].kind),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.players, vec![
-            Player {
-                coins: 0,
-                cards: vec![
-                    PlayerCard { kind: Card::Ambassador, revealed: false },
-                    PlayerCard { kind: Card::Contessa, revealed: false },
-                ],
-            },
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Captain, revealed: true },
-                    PlayerCard { kind: Card::Duke, revealed: false },
-                ],
-            },
-        ]);
-        assert_eq!(game.blockers, vec![
-            Blocker::RevealCard {
-                target: 1,
-            },
-        ]);
-    }
-
-    #[test]
-    fn exchange_should_add_counteraction() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Exchange,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
-                action_type: ActionType::Exchange,
-                target: 0,
-                source: None,
-            },
-        ]);
-        assert_eq!(game.players[0].coins, 2);
-    }
-
-    #[test]
-    fn complete_after_exchange_should_add_drop_cards_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Exchange,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::DropCard {
-                target: 0,
-            },
-        ]);
-    }
-
-    #[test]
-    fn drop_cards_should_advance_game() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Exchange,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Complete,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::DropCard(game.players[0].cards[0].kind),
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.players, vec![
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Contessa, revealed: false },
-                    PlayerCard { kind: Card::Assassin, revealed: false },
-                ],
-            },
-            Player {
-                coins: 2,
-                cards: vec![
-                    PlayerCard { kind: Card::Captain, revealed: false },
-                    PlayerCard { kind: Card::Duke, revealed: false },
-                ],
-            },
-        ]);
-        assert_eq!(game.blockers, vec![]);
-    }
-
-    #[test]
-    fn challenge_after_exchange_should_add_challenge_blocker() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
-        assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Exchange,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(
-            game.play(&Action {
+            Action {
                 player: 1,
                 action_type: ActionType::Challenge,
-            }, &mut rng),
-            Ok(())
-        );
-        assert_eq!(game.blockers, vec![
-            Blocker::Counteraction {
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(game.player_cards[1][0]),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(game.player_cards[1][1]),
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 2 });
+        assert_eq!(game.player_coins[0], 0);
+        assert_eq!(game.player_hands[1], 0);
+        assert_eq!(game.player_cards_counter[1], 0);
+        assert_eq!(game.player_cards[1], vec![]);
+        assert_eq!(game.revealed_cards, vec![Card::Ambassador, Card::Duke]);
+    }
+
+    #[test]
+    fn failed_assassination_challenge_for_targeted_player_with_one_card_should_not_allow_it_to_block() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        game.player_coins[0] = 3;
+        game.player_cards[0][0] = Card::Assassin;
+        game.player_hands[1] = 1;
+        game.player_cards_counter[1] = 1;
+        game.player_cards[1].remove(1);
+        let actions = [
+            Action {
+                player: 0,
+                action_type: ActionType::Assassinate(1),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(game.player_cards[1][0]),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 2 });
+        assert_eq!(game.player_coins[0], 0);
+        assert_eq!(game.player_hands[1], 0);
+        assert_eq!(game.player_cards_counter[1], 0);
+        assert_eq!(game.player_cards[1], vec![]);
+        assert_eq!(game.revealed_cards, vec![Card::Ambassador]);
+    }
+
+    #[test]
+    fn successful_exchange_should_replace_cards_with_deck() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        game.player_coins[0] = 3;
+        game.player_cards[0][0] = Card::Assassin;
+        let actions = [
+            Action {
+                player: 0,
                 action_type: ActionType::Exchange,
-                target: 0,
-                source: Some(1),
             },
-            Blocker::Challenge {
-                target: 0,
-                source: 1,
-                card: Card::Ambassador,
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
             },
-        ]);
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::DropCard(game.player_cards[0][0]),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::DropCard(game.player_cards[0][1]),
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
+        assert_eq!(game.player_cards[0], vec![Card::Captain, Card::Duke]);
+    }
+
+    #[test]
+    fn successful_challenge_for_exchange_should_prevent_exchange() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let actions = [
+            Action {
+                player: 0,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(game.player_cards[0][0]),
+            },
+        ];
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
+        assert_eq!(game.state_type, StateType::Turn { player: 1 });
     }
 
     #[test]
@@ -2237,17 +1589,32 @@ mod tests {
         let actions = get_example_actions();
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(get_example_settings(), &mut rng);
-        for i in 0..actions.len() {
-            let action = &actions[i];
-            let view = game.get_anonymous_view();
-            let allowed_actions = get_available_actions(view.player, &view.players, view.blockers);
-            assert!(allowed_actions.contains(action), "action={:?} allowed={:?}", action, allowed_actions);
-            assert_eq!(game.play(action, &mut rng), Ok(()), "{}) action={:?} player={:?} allowed={:?}", i, action, game.players[action.player], allowed_actions);
-        }
+        assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
         assert!(game.is_done());
         assert_eq!(game.get_winner(), Some(4));
         assert_eq!(game.step(), actions.len());
-        assert_eq!(game.turn(), 44);
-        assert_eq!(game.round(), 8);
+        assert_eq!(game.turn(), 45);
+        assert_eq!(game.round(), 9);
+    }
+
+    fn play_actions<R: Rng>(actions: &[Action], game: &mut Game, rng: &mut R) -> Result<(), String> {
+        for i in 0..actions.len() {
+            let action = &actions[i];
+            let view = game.get_player_view(action.player);
+            let available_actions = get_available_actions(&view.state_type, &view.player_coins, &view.player_hands);
+            game.print();
+            println!("Play {:?}", action);
+            match game.play(action, rng) {
+                Ok(_) => {
+                    assert!(available_actions.contains(action), "{}) played action {:?} is not considered as available: {:?}", i, action, available_actions);
+                }
+                Err(e) => {
+                    assert!(!available_actions.contains(action), "{}) failed action {:?} is considered as available: {:?}", i, action, available_actions);
+                    return Err(e);
+                }
+            }
+        }
+        game.print();
+        Ok(())
     }
 }

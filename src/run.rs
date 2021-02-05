@@ -1,12 +1,11 @@
-use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 
 use crate::bots::{ActionView, Bot, HonestCarefulRandomBot, RandomBot};
-use crate::game::{Action, ActionType, Game, Settings, get_available_actions};
+use crate::fsm::Action;
+use crate::game::{Game, get_available_actions, Settings};
 
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum BotType {
@@ -65,13 +64,9 @@ pub fn run_game<B: AsMut<dyn Bot>, R: Rng>(bots: &mut [B], game: &mut Game, rng:
         println!("{}", serde_json::to_string(&game.get_player_view(player)).unwrap());
     }
     while !game.is_done() {
-        let mut available_actions_per_player: BTreeMap<usize, Vec<Action>> = BTreeMap::new();
         let view = game.get_anonymous_view();
-        let actions = get_available_actions(view.player, &view.players, view.blockers);
-        for (player, group) in &actions.into_iter().group_by(|action| action.player) {
-            available_actions_per_player.insert(player, group.collect());
-        }
-        let action = get_action(&available_actions_per_player, bots, game);
+        let available_actions = get_available_actions(view.state_type, view.player_coins, view.player_hands);
+        let action = get_action(&available_actions, bots, game);
         if verbose {
             println!("play {:?}", action);
         }
@@ -95,31 +90,31 @@ pub fn run_game<B: AsMut<dyn Bot>, R: Rng>(bots: &mut [B], game: &mut Game, rng:
     }
 }
 
-pub fn get_action<B: AsMut<dyn Bot>>(available_actions_per_player: &BTreeMap<usize, Vec<Action>>, bots: &mut [B], game: &Game) -> Action {
-    if available_actions_per_player.len() > 1 {
-        let (last_player, last_player_available_actions) = available_actions_per_player.iter()
-            .find(|(_, available_actions)| {
-                available_actions.iter()
-                    .any(|action| matches!(action.action_type, ActionType::Complete))
-            })
-            .unwrap();
-        for (player, available_actions) in available_actions_per_player.iter() {
-            if *player > *last_player {
-                if let Some(action) = bots[*player].as_mut().get_optional_action(&game.get_player_view(*player), available_actions) {
-                    return action;
-                }
+pub fn get_action<B: AsMut<dyn Bot>>(available_actions: &Vec<Action>, bots: &mut [B], game: &Game) -> Action {
+    let mut players = Vec::new();
+    for action in available_actions.iter() {
+        if !players.contains(&action.player) {
+            players.push(action.player);
+        }
+    }
+    if players.len() > 1 {
+        for player in &players[0..players.len() - 1] {
+            let player_available_actions: Vec<Action> = available_actions.iter()
+                .filter(|action| action.player == *player)
+                .cloned()
+                .collect();
+            if let Some(action) = bots[*player].as_mut().get_optional_action(&game.get_player_view(*player), &player_available_actions) {
+                return action;
             }
         }
-        for (player, available_actions) in available_actions_per_player.iter() {
-            if *player < *last_player {
-                if let Some(action) = bots[*player].as_mut().get_optional_action(&game.get_player_view(*player), available_actions) {
-                    return action;
-                }
-            }
-        }
-        bots[*last_player].as_mut().get_action(&game.get_player_view(*last_player), last_player_available_actions)
+        let last_player = players[players.len() - 1];
+        let last_player_available_actions: Vec<Action> = available_actions.iter()
+            .filter(|action| action.player == last_player)
+            .cloned()
+            .collect();
+        bots[last_player].as_mut().get_action(&game.get_player_view(last_player), &last_player_available_actions)
     } else {
-        let (player, available_actions) = available_actions_per_player.iter().next().unwrap();
-        bots[*player].as_mut().get_action(&game.get_player_view(*player), available_actions)
+        let player = players[0];
+        bots[player].as_mut().get_action(&game.get_player_view(player), available_actions)
     }
 }
