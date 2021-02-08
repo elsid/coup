@@ -234,19 +234,26 @@ fn suggest_from_file<F: BufRead>(bot_type: BotType, mut file: F) {
     file.read_line(&mut line).unwrap();
     let settings: Settings = serde_json::from_str(&line).unwrap();
     if let Some(view) = read_game_view(&mut file) {
-        let player_view = view.player_view();
         match bot_type {
-            BotType::Random => suggest_from_file_with_bot(&player_view, file, RandomBot::new(&player_view)),
-            BotType::HonestCarefulRandom => suggest_from_file_with_bot(&player_view, file, HonestCarefulRandomBot::new(&player_view, &settings)),
+            BotType::Random => {
+                let bot = RandomBot::new(&view.player_view());
+                suggest_from_file_with_bot(view, file, bot);
+            }
+            BotType::HonestCarefulRandom => {
+                let bot = HonestCarefulRandomBot::new(&view.player_view(), &settings);
+                suggest_from_file_with_bot(view, file, bot)
+            }
         }
     }
 }
 
-fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: &PlayerView, mut file: F, mut bot: B) {
-    let available_actions = get_available_actions(initial_view.state_type, initial_view.player_coins, initial_view.player_hands);
-    let mut suggested_actions: Vec<Action> = bot.suggest_actions(initial_view, &available_actions).iter()
+fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: GameView, mut file: F, mut bot: B) {
+    let initial_player_view = initial_view.player_view();
+    let available_actions = get_available_actions(initial_player_view.state_type, initial_player_view.player_coins, initial_player_view.player_hands);
+    let mut suggested_actions: Vec<Action> = bot.suggest_actions(&initial_player_view, &available_actions).iter()
         .map(|v| (*v).clone())
         .collect();
+    let mut last_view = initial_view;
     while let Some(action) = read_action(&mut file) {
         if let Some(view) = read_game_view(&mut file) {
             if view.player == action.player {
@@ -258,10 +265,12 @@ fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: &PlayerView, mut
             suggested_actions = bot.suggest_actions(&view.player_view(), &available_actions).iter()
                 .map(|v| (*v).clone())
                 .collect();
+            last_view = view;
         } else {
             break;
         }
     }
+    println!("[{}] {:?}", last_view.step, last_view);
     for action in suggested_actions {
         println!("{}", serde_json::to_string(&action).unwrap());
     }
