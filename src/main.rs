@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate scan_fmt;
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -10,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bots::{ActionView, Bot, CardsTracker, HonestCarefulRandomBot, is_allowed_action_type, RandomBot};
 use crate::fsm::{Action, Card, StateType};
 use crate::game::{Game, get_available_actions, get_example_actions, get_example_settings, PlayerView, Settings};
+use crate::interactive::run_interactive_game;
 use crate::run::{BotType, run_game_with_bots};
 use crate::stats::{collect_random_games_stats, print_stats};
 
@@ -18,6 +22,7 @@ mod bots;
 mod stats;
 mod run;
 mod fsm;
+mod interactive;
 
 #[derive(Clap)]
 struct Args {
@@ -34,6 +39,7 @@ enum Command {
     Track(TrackerParams),
     Suggest(SuggestParams),
     Fuzzy(FuzzyParams),
+    Interactive,
 }
 
 #[derive(Clap, Debug)]
@@ -111,6 +117,7 @@ fn main() {
         Command::Track(params) => track(params),
         Command::Suggest(params) => suggest(params),
         Command::Fuzzy(params) => fuzzy(params),
+        Command::Interactive => run_interactive_game(),
     }
 }
 
@@ -249,7 +256,9 @@ fn suggest_from_file<F: BufRead>(bot_type: BotType, mut file: F) {
 
 fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: GameView, mut file: F, mut bot: B) {
     let initial_player_view = initial_view.player_view();
-    let available_actions = get_available_actions(initial_player_view.state_type, initial_player_view.player_coins, initial_player_view.player_hands);
+    let available_actions: Vec<Action> = get_available_actions(initial_player_view.state_type, initial_player_view.player_coins, initial_player_view.player_hands).into_iter()
+        .filter(|action| action.player == initial_view.player)
+        .collect();
     let mut suggested_actions: Vec<Action> = bot.suggest_actions(&initial_player_view, &available_actions).iter()
         .map(|v| (*v).clone())
         .collect();
@@ -261,7 +270,9 @@ fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: GameView, mut fi
             } else {
                 bot.after_opponent_action(&view.player_view(), &ActionView::from_action(&action));
             }
-            let available_actions = get_available_actions(&view.state_type, &view.player_coins, &view.player_hands);
+            let available_actions: Vec<Action> = get_available_actions(&view.state_type, &view.player_coins, &view.player_hands).into_iter()
+                .filter(|action| action.player == view.player)
+                .collect();
             suggested_actions = bot.suggest_actions(&view.player_view(), &available_actions).iter()
                 .map(|v| (*v).clone())
                 .collect();

@@ -21,6 +21,8 @@ pub trait Bot {
     fn after_player_action(&mut self, view: &PlayerView, action: &Action);
 
     fn after_opponent_action(&mut self, view: &PlayerView, action: &ActionView);
+
+    fn query(&self, command: &str);
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +158,8 @@ impl Bot for RandomBot {
     fn after_player_action(&mut self, _: &PlayerView, _: &Action) {}
 
     fn after_opponent_action(&mut self, _: &PlayerView, _: &ActionView) {}
+
+    fn query(&self, _: &str) {}
 }
 
 #[derive(Debug)]
@@ -778,6 +782,10 @@ impl Bot for HonestCarefulRandomBot {
 
     fn after_opponent_action(&mut self, view: &PlayerView, action: &ActionView) {
         self.cards_tracker.after_opponent_action(view, action);
+    }
+
+    fn query(&self, _: &str) {
+        self.cards_tracker.print();
     }
 }
 

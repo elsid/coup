@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use rand::Rng;
@@ -41,6 +42,22 @@ pub enum Card {
     Captain,
     Contessa,
     Duke,
+}
+
+impl FromStr for Card {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Unknown" | "unknown" => Ok(Card::Unknown),
+            "Assassin" | "assassin" => Ok(Card::Assassin),
+            "Ambassador" | "ambassador" => Ok(Card::Ambassador),
+            "Captain" | "captain" => Ok(Card::Captain),
+            "Contessa" | "contessa" => Ok(Card::Contessa),
+            "Duke" | "duke" => Ok(Card::Duke),
+            _ => Err(format!("invalid card: {}", s)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
