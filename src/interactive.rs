@@ -151,12 +151,10 @@ pub fn run_interactive_game() {
                     .map(|index| {
                         if let Some(v) = custom_player_names.get(&index) {
                             v.clone()
+                        } else if index == player_index {
+                            String::from("me")
                         } else {
-                            if index == player_index {
-                                String::from("me")
-                            } else {
-                                format!("{}", index)
-                            }
+                            format!("{}", index)
                         }
                     })
                     .collect();
@@ -266,7 +264,7 @@ fn parse_command(line: &str) -> Result<Command, ScanError> {
             match scan_fmt!(line, "bot {}", String)?.as_str() {
                 "suggest" => BotCommand::SuggestActions,
                 "get" => BotCommand::GetAction,
-                "custom" => BotCommand::Custom(get_tail(name.len(), get_tail(3, &line)).into()),
+                "custom" => BotCommand::Custom(get_tail(name.len(), get_tail(3, line)).into()),
                 v => return Err(ScanError(format!("invalid bot command: {}", v))),
             },
         )),
@@ -522,7 +520,7 @@ fn interactive_with_bot<B: Bot + Sized + Clone>(
                 }
             }
             Command::Bot(bot_command) => {
-                let available_actions = get_available_actions(
+                let available_actions: Vec<Action> = get_available_actions(
                     &game_state.state_type,
                     &game_state.player_coins,
                     &game_state.player_hands,
@@ -556,7 +554,7 @@ fn handle_game_action<B: Bot>(
     game_state: &mut GameState,
     bot: &mut B,
 ) -> Result<(), String> {
-    let player = get_player_index(&game_action.player, &player_names)?;
+    let player = get_player_index(&game_action.player, player_names)?;
     let action_type = match &game_action.action_type {
         GameActionType::Income => ActionType::Income,
         GameActionType::ForeignAid => ActionType::ForeignAid,
@@ -695,10 +693,10 @@ fn print_state(game_state: &GameState, player_names: &[String]) {
     println!("player_index: {}", game_state.player);
     println!("deck size: {}", game_state.deck.size);
     println!("players:");
-    for i in 0..player_names.len() {
+    for (i, player_name) in player_names.iter().enumerate() {
         print!(
             "{}) {} coins={} ",
-            i, player_names[i], game_state.player_coins[i]
+            i, player_name, game_state.player_coins[i]
         );
         match &game_state.player_cards[i] {
             GamePlayerCards::Player(cards) => println!("cards={:?}", cards),
@@ -708,7 +706,7 @@ fn print_state(game_state: &GameState, player_names: &[String]) {
     std::io::stdout().flush().unwrap();
 }
 
-const HELP: &'static str = r#"
+const HELP: &str = r#"
 Commands:
 help - show this message
 quit - stop the game and exit the process

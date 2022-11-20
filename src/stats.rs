@@ -116,9 +116,9 @@ pub fn print_stats(stats: &Stats) {
     winner_bot_type.sort_by_key(|(_, games)| *games);
     let mut winner_initial_cards: Vec<(Vec<Card>, usize)> = Vec::new();
     let mut winner_bot_type_and_initial_cards: Vec<((BotType, Vec<Card>), usize)> = Vec::new();
-    for i in 0..ALL_CARDS.len() {
-        for j in i..ALL_CARDS.len() {
-            let cards = vec![ALL_CARDS[i], ALL_CARDS[j]];
+    for (i, card) in ALL_CARDS.iter().enumerate() {
+        for other_card in ALL_CARDS.iter().skip(i) {
+            let cards = vec![*card, *other_card];
             winner_initial_cards.push((
                 cards.clone(),
                 existing_winner_initial_cards
@@ -172,7 +172,7 @@ pub fn print_stats(stats: &Stats) {
     println!();
 }
 
-fn count(values: &Vec<usize>) -> BTreeMap<usize, usize> {
+fn count(values: &[usize]) -> BTreeMap<usize, usize> {
     let mut result: BTreeMap<usize, usize> = BTreeMap::new();
     for value in values.iter() {
         *result.entry(*value).or_insert(0) += 1;

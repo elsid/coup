@@ -87,17 +87,16 @@ pub fn run_game<B: AsMut<dyn Bot>, R: Rng>(
         if verbose {
             game.print();
         }
-        for player in 0..bots.len() {
+        for (player, bot) in bots.iter_mut().enumerate() {
             let view = game.get_player_view(player);
             if write_player == Some(player) {
                 println!("{}", serde_json::to_string(&view).unwrap());
             }
             if game.is_player_active(player) {
                 if player == action.player {
-                    bots[player].as_mut().after_player_action(&view, &action);
+                    bot.as_mut().after_player_action(&view, &action);
                 } else {
-                    bots[player]
-                        .as_mut()
+                    bot.as_mut()
                         .after_opponent_action(&view, &ActionView::from_action(&action));
                 }
             }
@@ -106,7 +105,7 @@ pub fn run_game<B: AsMut<dyn Bot>, R: Rng>(
 }
 
 pub fn get_action<B: AsMut<dyn Bot>>(
-    available_actions: &Vec<Action>,
+    available_actions: &[Action],
     bots: &mut [B],
     game: &Game,
 ) -> Action {

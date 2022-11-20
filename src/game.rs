@@ -93,8 +93,8 @@ pub fn get_turn_available_actions(
 ) -> Vec<Action> {
     if player_coins[player] >= MAX_COINS {
         let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
-        for other_player in 0..player_hands.len() {
-            if other_player != player && player_hands[other_player] > 0 {
+        for (other_player, other_player_hand) in player_hands.iter().enumerate() {
+            if other_player != player && *other_player_hand > 0 {
                 actions.push(Action {
                     player,
                     action_type: ActionType::Coup(other_player),
@@ -117,8 +117,8 @@ pub fn get_turn_available_actions(
             action_type,
         });
     }
-    for other_player in 0..player_hands.len() {
-        if other_player != player && player_hands[other_player] > 0 {
+    for (other_player, other_player_hand) in player_hands.iter().enumerate() {
+        if other_player != player && *other_player_hand > 0 {
             actions.push(Action {
                 player,
                 action_type: ActionType::Steal(other_player),
@@ -316,16 +316,16 @@ fn fill_actions(
     player_hands: &[usize],
     actions: &mut Vec<Action>,
 ) {
-    for player in target + 1..player_hands.len() {
-        if player_hands[player] > 0 {
+    for (player, player_hand) in player_hands.iter().enumerate().skip(target + 1) {
+        if *player_hand > 0 {
             actions.push(Action {
                 player,
                 action_type: action_type.clone(),
             });
         }
     }
-    for player in 0..target {
-        if player_hands[player] > 0 {
+    for (player, player_hand) in player_hands.iter().enumerate().take(target) {
+        if *player_hand > 0 {
             actions.push(Action {
                 player,
                 action_type: action_type.clone(),
@@ -1887,11 +1887,10 @@ mod tests {
         game: &mut Game,
         rng: &mut R,
     ) -> Result<(), String> {
-        for i in 0..actions.len() {
-            let action = &actions[i];
+        for (i, action) in actions.iter().enumerate() {
             let view = game.get_player_view(action.player);
             let available_actions =
-                get_available_actions(&view.state_type, &view.player_coins, &view.player_hands);
+                get_available_actions(view.state_type, view.player_coins, view.player_hands);
             game.print();
             println!("Play {:?}", action);
             match game.play(action, rng) {

@@ -401,7 +401,7 @@ fn on_turn(
                 can_challenge: true,
             })
         }
-        _ => return Err(Error::InvalidAction),
+        _ => Err(Error::InvalidAction),
     }
 }
 
@@ -430,7 +430,7 @@ fn on_foreign_aid(
                 target: player,
             })
         }
-        _ => return Err(Error::InvalidAction),
+        _ => Err(Error::InvalidAction),
     }
 }
 
@@ -464,7 +464,7 @@ fn on_tax(
                 source: Rc::new(StateType::Tax { player }),
             })
         }
-        _ => return Err(Error::InvalidAction),
+        _ => Err(Error::InvalidAction),
     }
 }
 
@@ -536,7 +536,7 @@ fn on_assassination(
                     }),
                 })
             }
-            _ => return Err(Error::InvalidAction),
+            _ => Err(Error::InvalidAction),
         }
     } else {
         match &action.action_type {
@@ -640,6 +640,7 @@ fn on_steal(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_challenge<P, D, R>(
     current_player: usize,
     source: &Rc<StateType>,
@@ -1014,6 +1015,7 @@ pub enum ChallengeState {
     TargetRevealedCard,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn play_challenge_action<P, D, R>(
     state: &ChallengeState,
     player_hands: &mut [usize],
@@ -1064,6 +1066,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_challenge_initial<P, D>(
     initiator: usize,
     target: usize,

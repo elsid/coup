@@ -16,21 +16,21 @@ pub trait Bot {
     fn suggest_actions<'a>(
         &mut self,
         view: &PlayerView,
-        available_actions: &'a Vec<Action>,
+        available_actions: &'a [Action],
     ) -> Vec<&'a Action>;
 
     fn suggest_optional_actions<'a>(
         &mut self,
         view: &PlayerView,
-        available_actions: &'a Vec<Action>,
+        available_actions: &'a [Action],
     ) -> Vec<&'a Action>;
 
-    fn get_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Action;
+    fn get_action(&mut self, view: &PlayerView, available_actions: &[Action]) -> Action;
 
     fn get_optional_action(
         &mut self,
         view: &PlayerView,
-        available_actions: &Vec<Action>,
+        available_actions: &[Action],
     ) -> Option<Action>;
 
     fn after_player_action(&mut self, view: &PlayerView, action: &Action);
@@ -148,7 +148,7 @@ impl Bot for RandomBot {
     fn suggest_actions<'a>(
         &mut self,
         view: &PlayerView,
-        available_actions: &'a Vec<Action>,
+        available_actions: &'a [Action],
     ) -> Vec<&'a Action> {
         available_actions
             .iter()
@@ -159,15 +159,15 @@ impl Bot for RandomBot {
     fn suggest_optional_actions<'a>(
         &mut self,
         view: &PlayerView,
-        available_actions: &'a Vec<Action>,
+        available_actions: &'a [Action],
     ) -> Vec<&'a Action> {
         self.suggest_actions(view, available_actions)
     }
 
-    fn get_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Action {
+    fn get_action(&mut self, view: &PlayerView, available_actions: &[Action]) -> Action {
         self.suggest_actions(view, available_actions)
             .choose(&mut self.rng)
-            .map(|v| *v)
+            .copied()
             .unwrap()
             .clone()
     }
@@ -175,7 +175,7 @@ impl Bot for RandomBot {
     fn get_optional_action(
         &mut self,
         view: &PlayerView,
-        available_actions: &Vec<Action>,
+        available_actions: &[Action],
     ) -> Option<Action> {
         if self.rng.gen::<bool>() {
             Some(self.get_action(view, available_actions))
@@ -374,8 +374,8 @@ struct GameState {
 }
 
 impl GameState {
-    fn initial(player: usize, cards: &Vec<Card>, settings: &Settings) -> Vec<Self> {
-        let mut ordered_cards = cards.clone();
+    fn initial(player: usize, cards: &[Card], settings: &Settings) -> Vec<Self> {
+        let mut ordered_cards = cards.to_owned();
         ordered_cards.sort();
         let mut unique_cards = ordered_cards.clone();
         unique_cards.dedup();
@@ -396,7 +396,7 @@ impl GameState {
             player_cards: (0..settings.players_number)
                 .map(|index| {
                     if index == player {
-                        GamePlayerCards::Player(cards.clone())
+                        GamePlayerCards::Player(cards.to_owned())
                     } else {
                         GamePlayerCards::Opponent(CardCollection {
                             known: Vec::with_capacity(CARDS_PER_PLAYER + MAX_CARDS_TO_EXCHANGE),
@@ -414,7 +414,7 @@ impl GameState {
         let mut result = Vec::new();
         let targets: Vec<usize> = (0..settings.players_number)
             .into_iter()
-            .filter(|v| *v != player || *v == player && deck_len > 0)
+            .filter(|v| *v != player || deck_len > 0)
             .collect();
         if unique_cards.len() == 1 {
             if settings.cards_per_type > 2 {
@@ -656,7 +656,7 @@ pub struct CardsTracker {
 }
 
 impl CardsTracker {
-    pub fn new(player: usize, hand: &Vec<Card>, settings: &Settings) -> Self {
+    pub fn new(player: usize, hand: &[Card], settings: &Settings) -> Self {
         Self {
             player,
             cards_per_type: settings.cards_per_type,
@@ -676,7 +676,7 @@ impl CardsTracker {
                         .zip(cards.iter())
                         .find(|(l, r)| **l != **r)
                         .map(|(view_card, _)| *view_card)
-                        .unwrap_or_else(|| view.cards.last().unwrap().clone())
+                        .unwrap_or_else(|| *view.cards.last().unwrap())
                 } else {
                     panic!(
                         "Player has invalid kind of cards: {:?}",
@@ -697,7 +697,7 @@ impl CardsTracker {
         self.game_states.sort();
         self.game_states.dedup();
         self.game_states.retain(|game_state| game_state.valid);
-        self.last_action = Some(ActionView::from_action(&action));
+        self.last_action = Some(ActionView::from_action(action));
     }
 
     pub fn after_opponent_action(&mut self, view: &PlayerView, action_view: &ActionView) {
@@ -836,7 +836,7 @@ pub struct HonestCarefulRandomBot {
 impl HonestCarefulRandomBot {
     pub fn new(view: &PlayerView, settings: &Settings) -> Self {
         Self {
-            cards_tracker: CardsTracker::new(view.player, &view.cards.into(), settings),
+            cards_tracker: CardsTracker::new(view.player, view.cards, settings),
             rng: make_rng_from_cards(view.cards),
         }
     }
@@ -846,7 +846,7 @@ impl Bot for HonestCarefulRandomBot {
     fn suggest_actions<'a>(
         &mut self,
         view: &PlayerView,
-        available_actions: &'a Vec<Action>,
+        available_actions: &'a [Action],
     ) -> Vec<&'a Action> {
         available_actions
             .iter()
@@ -862,15 +862,15 @@ impl Bot for HonestCarefulRandomBot {
     fn suggest_optional_actions<'a>(
         &mut self,
         view: &PlayerView,
-        available_actions: &'a Vec<Action>,
+        available_actions: &'a [Action],
     ) -> Vec<&'a Action> {
         self.suggest_actions(view, available_actions)
     }
 
-    fn get_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Action {
+    fn get_action(&mut self, view: &PlayerView, available_actions: &[Action]) -> Action {
         self.suggest_actions(view, available_actions)
             .choose(&mut self.rng)
-            .map(|v| *v)
+            .copied()
             .unwrap()
             .clone()
     }
@@ -878,7 +878,7 @@ impl Bot for HonestCarefulRandomBot {
     fn get_optional_action(
         &mut self,
         view: &PlayerView,
-        available_actions: &Vec<Action>,
+        available_actions: &[Action],
     ) -> Option<Action> {
         self.suggest_optional_actions(view, available_actions)
             .choose(&mut self.rng)
@@ -1005,11 +1005,8 @@ mod tests {
             cards_per_type: 3,
         };
         for target_player in 0..settings.players_number {
-            let game_states = GameState::initial(
-                target_player,
-                &vec![Card::Captain, Card::Captain],
-                &settings,
-            );
+            let game_states =
+                GameState::initial(target_player, &[Card::Captain, Card::Captain], &settings);
             assert_eq!(game_states.len(), 6);
             for game_state in game_states.iter() {
                 assert!(game_state.valid);
@@ -1051,7 +1048,7 @@ mod tests {
         };
         for target_player in 0..settings.players_number {
             let game_states =
-                GameState::initial(target_player, &vec![Card::Duke, Card::Captain], &settings);
+                GameState::initial(target_player, &[Card::Duke, Card::Captain], &settings);
             assert_eq!(game_states.len(), 385);
             for game_state in game_states.iter() {
                 assert!(game_state.valid);
@@ -1094,7 +1091,7 @@ mod tests {
         };
         let mut tracker = CardsTracker::new(0, &hand, &settings);
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(settings.clone(), &mut rng);
+        let mut game = Game::new(settings, &mut rng);
         let actions = [
             Action {
                 player: 0,
@@ -1635,19 +1632,16 @@ mod tests {
         tracker: &mut CardsTracker,
         rng: &mut R,
     ) -> Result<(), String> {
-        for i in 0..actions.len() {
+        for action in actions.iter() {
             game.print();
-            let action = &actions[i];
             println!("Play {:?}", action);
-            if let Err(e) = game.play(action, rng) {
-                return Err(e);
-            }
+            game.play(action, rng)?;
             if action.player == 0 {
                 tracker.after_player_action(&game.get_player_view(0), action);
             } else {
                 tracker.after_opponent_action(
                     &game.get_player_view(0),
-                    &ActionView::from_action(&action),
+                    &ActionView::from_action(action),
                 );
             }
         }
