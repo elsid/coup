@@ -162,12 +162,6 @@ impl Bot for RandomBot {
     fn query(&self, _: &str) {}
 }
 
-#[derive(Debug)]
-struct Diff {
-    added: usize,
-    removed: usize,
-}
-
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 struct CardCollection {
     known: Vec<Card>,

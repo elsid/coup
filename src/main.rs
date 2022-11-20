@@ -4,7 +4,7 @@ extern crate scan_fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use clap::Clap;
+use clap::Parser;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
@@ -24,13 +24,13 @@ mod run;
 mod fsm;
 mod interactive;
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Args {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Command,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 enum Command {
     Simulate(SimulateParams),
     Replay(ReplayParams),
@@ -42,68 +42,68 @@ enum Command {
     Interactive,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct SimulateParams {
-    #[clap(long)]
+    #[arg(long)]
     bot_types: Vec<BotType>,
-    #[clap(long, default_value = "42")]
+    #[arg(long, default_value = "42")]
     seed: u64,
-    #[clap(long, default_value = "0")]
+    #[arg(long, default_value = "0")]
     max_steps: usize,
-    #[clap(long, default_value = "6")]
+    #[arg(long, default_value = "6")]
     players_number: usize,
-    #[clap(long, default_value = "3")]
+    #[arg(long, default_value = "3")]
     cards_per_type: usize,
-    #[clap(long)]
+    #[arg(long)]
     write_player: Option<usize>,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct StatsParams {
-    #[clap(long, default_value = "100000")]
+    #[arg(long, default_value = "100000")]
     games: usize,
-    #[clap(long, default_value = "1")]
+    #[arg(long, default_value = "1")]
     workers: usize,
-    #[clap(long, default_value = "42")]
+    #[arg(long, default_value = "42")]
     seed: u64,
-    #[clap(long)]
+    #[arg(long)]
     bot_types: Vec<BotType>,
-    #[clap(long, default_value = "6")]
+    #[arg(long, default_value = "6")]
     players_number: usize,
-    #[clap(long, default_value = "3")]
+    #[arg(long, default_value = "3")]
     cards_per_type: usize,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct ReplayParams {
-    #[clap(long)]
+    #[arg(long)]
     verbose: bool,
-    #[clap(long)]
+    #[arg(long)]
     write_player: Option<usize>,
     file: Option<String>,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct TrackerParams {
     file: Option<String>,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct SuggestParams {
-    #[clap(long)]
+    #[arg(long)]
     bot_type: BotType,
     file: Option<String>,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct FuzzyParams {
-    #[clap(long, default_value = "42")]
+    #[arg(long, default_value = "42")]
     seed: u64,
-    #[clap(long, default_value = "10000")]
+    #[arg(long, default_value = "10000")]
     max_games: usize,
-    #[clap(long, default_value = "6")]
+    #[arg(long, default_value = "6")]
     players_number: usize,
-    #[clap(long, default_value = "3")]
+    #[arg(long, default_value = "3")]
     cards_per_type: usize,
 }
 
