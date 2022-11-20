@@ -2,21 +2,36 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use itertools::Itertools;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
+use rand::{Rng, SeedableRng};
 
-use crate::fsm::{Action, ActionType, Card, CARDS_PER_PLAYER, ConstRng, Deck, Error, MAX_CARDS_TO_EXCHANGE, play_action, PlayerCards, State, StateType};
-use crate::game::{ALL_CARDS, INITIAL_COINS, PlayerView, Settings};
+use crate::fsm::{
+    play_action, Action, ActionType, Card, ConstRng, Deck, Error, PlayerCards, State, StateType,
+    CARDS_PER_PLAYER, MAX_CARDS_TO_EXCHANGE,
+};
+use crate::game::{PlayerView, Settings, ALL_CARDS, INITIAL_COINS};
 
 pub trait Bot {
-    fn suggest_actions<'a>(&mut self, view: &PlayerView, available_actions: &'a Vec<Action>) -> Vec<&'a Action>;
+    fn suggest_actions<'a>(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &'a Vec<Action>,
+    ) -> Vec<&'a Action>;
 
-    fn suggest_optional_actions<'a>(&mut self, view: &PlayerView, available_actions: &'a Vec<Action>) -> Vec<&'a Action>;
+    fn suggest_optional_actions<'a>(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &'a Vec<Action>,
+    ) -> Vec<&'a Action>;
 
     fn get_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Action;
 
-    fn get_optional_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Option<Action>;
+    fn get_optional_action(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &Vec<Action>,
+    ) -> Option<Action>;
 
     fn after_player_action(&mut self, view: &PlayerView, action: &Action);
 
@@ -130,13 +145,22 @@ fn make_rng_from_cards(cards: &[Card]) -> StdRng {
 }
 
 impl Bot for RandomBot {
-    fn suggest_actions<'a>(&mut self, view: &PlayerView, available_actions: &'a Vec<Action>) -> Vec<&'a Action> {
-        available_actions.iter()
+    fn suggest_actions<'a>(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &'a Vec<Action>,
+    ) -> Vec<&'a Action> {
+        available_actions
+            .iter()
             .filter(|action| is_allowed_action_type(&action.action_type, view.cards))
             .collect()
     }
 
-    fn suggest_optional_actions<'a>(&mut self, view: &PlayerView, available_actions: &'a Vec<Action>) -> Vec<&'a Action> {
+    fn suggest_optional_actions<'a>(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &'a Vec<Action>,
+    ) -> Vec<&'a Action> {
         self.suggest_actions(view, available_actions)
     }
 
@@ -144,10 +168,15 @@ impl Bot for RandomBot {
         self.suggest_actions(view, available_actions)
             .choose(&mut self.rng)
             .map(|v| *v)
-            .unwrap().clone()
+            .unwrap()
+            .clone()
     }
 
-    fn get_optional_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Option<Action> {
+    fn get_optional_action(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &Vec<Action>,
+    ) -> Option<Action> {
         if self.rng.gen::<bool>() {
             Some(self.get_action(view, available_actions))
         } else {
@@ -221,7 +250,9 @@ impl PlayerCards for CardCollection {
         if matches!(card, Card::Unknown) {
             self.unknown -= 1;
         } else {
-            let index = self.known.iter()
+            let index = self
+                .known
+                .iter()
                 .find_position(|v| **v == card)
                 .map(|(index, _)| index);
             if let Some(index) = index {
@@ -277,9 +308,7 @@ impl GamePlayerCards {
 
     fn count_known(&self, card: Card) -> usize {
         match self {
-            GamePlayerCards::Player(cards) => {
-                cards.iter().filter(|v| **v == card).count()
-            }
+            GamePlayerCards::Player(cards) => cards.iter().filter(|v| **v == card).count(),
             GamePlayerCards::Opponent(cards) => cards.count_known(card),
         }
     }
@@ -350,13 +379,20 @@ impl GameState {
         ordered_cards.sort();
         let mut unique_cards = ordered_cards.clone();
         unique_cards.dedup();
-        let deck_len = settings.cards_per_type * ALL_CARDS.len() - settings.players_number * CARDS_PER_PLAYER;
+        let deck_len =
+            settings.cards_per_type * ALL_CARDS.len() - settings.players_number * CARDS_PER_PLAYER;
         let base_game_state = Self {
             valid: true,
             state_type: StateType::Turn { player: 0 },
-            player_coins: std::iter::repeat(INITIAL_COINS).take(settings.players_number).collect(),
-            player_hands: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
-            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
+            player_coins: std::iter::repeat(INITIAL_COINS)
+                .take(settings.players_number)
+                .collect(),
+            player_hands: std::iter::repeat(CARDS_PER_PLAYER)
+                .take(settings.players_number)
+                .collect(),
+            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER)
+                .take(settings.players_number)
+                .collect(),
             player_cards: (0..settings.players_number)
                 .map(|index| {
                     if index == player {
@@ -376,12 +412,16 @@ impl GameState {
             },
         };
         let mut result = Vec::new();
-        let targets: Vec<usize> = (0..settings.players_number).into_iter()
+        let targets: Vec<usize> = (0..settings.players_number)
+            .into_iter()
             .filter(|v| *v != player || *v == player && deck_len > 0)
             .collect();
         if unique_cards.len() == 1 {
             if settings.cards_per_type > 2 {
-                for opponents in targets.iter().combinations_with_replacement(settings.cards_per_type - 2) {
+                for opponents in targets
+                    .iter()
+                    .combinations_with_replacement(settings.cards_per_type - 2)
+                {
                     let mut game_state = base_game_state.clone();
                     let mut add = true;
                     for &opponent in opponents {
@@ -406,8 +446,14 @@ impl GameState {
             }
         } else if unique_cards.len() == 2 {
             if settings.cards_per_type > 1 {
-                for first_opponents in targets.iter().combinations_with_replacement(settings.cards_per_type - 1) {
-                    for second_opponents in targets.iter().combinations_with_replacement(settings.cards_per_type - 1) {
+                for first_opponents in targets
+                    .iter()
+                    .combinations_with_replacement(settings.cards_per_type - 1)
+                {
+                    for second_opponents in targets
+                        .iter()
+                        .combinations_with_replacement(settings.cards_per_type - 1)
+                    {
                         let mut game_state = base_game_state.clone();
                         let mut add = true;
                         for &&opponent in first_opponents.iter() {
@@ -422,7 +468,8 @@ impl GameState {
                                     add = false;
                                     break;
                                 }
-                                game_state.player_cards[opponent].replace_any_by_known(unique_cards[0]);
+                                game_state.player_cards[opponent]
+                                    .replace_any_by_known(unique_cards[0]);
                             }
                         }
                         if !add {
@@ -440,7 +487,8 @@ impl GameState {
                                     add = false;
                                     break;
                                 }
-                                game_state.player_cards[opponent].replace_any_by_known(unique_cards[1]);
+                                game_state.player_cards[opponent]
+                                    .replace_any_by_known(unique_cards[1]);
                             }
                         }
                         if add {
@@ -479,10 +527,19 @@ impl GameState {
                 }
             }
         }
-        println!(" deck={{u: {}, k: {:?}}} revealed={:?}", self.deck.unknown, self.deck.known, self.revealed_cards);
+        println!(
+            " deck={{u: {}, k: {:?}}} revealed={:?}",
+            self.deck.unknown, self.deck.known, self.revealed_cards
+        );
     }
 
-    fn is_safe_action_type(&self, player: usize, action_type: &ActionType, last_action: Option<&ActionView>, cards_per_type: usize) -> bool {
+    fn is_safe_action_type(
+        &self,
+        player: usize,
+        action_type: &ActionType,
+        last_action: Option<&ActionView>,
+        cards_per_type: usize,
+    ) -> bool {
         match action_type {
             ActionType::ForeignAid => {
                 self.count_known(Card::Duke) == cards_per_type
@@ -517,19 +574,24 @@ impl GameState {
     }
 
     fn count_known(&self, card: Card) -> usize {
-        self.player_cards.iter()
+        self.player_cards
+            .iter()
             .map(|player| player.count_known(card))
             .sum()
     }
 
     fn is_card_hold_by_opponent(&self, player: usize, card: Card) -> bool {
-        self.player_cards.iter()
+        self.player_cards
+            .iter()
             .enumerate()
             .filter(|(index, _)| *index != player)
             .any(|(_, opponent)| opponent.contains_known(card))
     }
 
-    fn with_default<F: FnMut(&mut State<GamePlayerCards, CardCollection>) -> Result<(), Error>>(&mut self, mut f: F) {
+    fn with_default<F: FnMut(&mut State<GamePlayerCards, CardCollection>) -> Result<(), Error>>(
+        &mut self,
+        mut f: F,
+    ) {
         let result = f(&mut State {
             state_type: &mut self.state_type,
             player_coins: &mut self.player_coins,
@@ -542,27 +604,43 @@ impl GameState {
         self.valid = matches!(result, Ok(..));
     }
 
-    fn with_pop_known_from_deck<F: FnMut(&mut State<GamePlayerCards, PopKnownFromDeck>) -> Result<(), Error>>(&mut self, card: Card, mut f: F) {
+    fn with_pop_known_from_deck<
+        F: FnMut(&mut State<GamePlayerCards, PopKnownFromDeck>) -> Result<(), Error>,
+    >(
+        &mut self,
+        card: Card,
+        mut f: F,
+    ) {
         let result = f(&mut State {
             state_type: &mut self.state_type,
             player_coins: &mut self.player_coins,
             player_hands: &mut self.player_hands,
             player_cards_counter: &mut self.player_cards_counter,
             player_cards: &mut self.player_cards,
-            deck: &mut PopKnownFromDeck { deck: &mut self.deck, card },
+            deck: &mut PopKnownFromDeck {
+                deck: &mut self.deck,
+                card,
+            },
             revealed_cards: &mut self.revealed_cards,
         });
         self.valid = matches!(result, Ok(..));
     }
 
-    fn with_pop_unknown_from_deck<F: FnMut(&mut State<GamePlayerCards, PopUnknownFromDeck>) -> Result<(), Error>>(&mut self, mut f: F) {
+    fn with_pop_unknown_from_deck<
+        F: FnMut(&mut State<GamePlayerCards, PopUnknownFromDeck>) -> Result<(), Error>,
+    >(
+        &mut self,
+        mut f: F,
+    ) {
         let result = f(&mut State {
             state_type: &mut self.state_type,
             player_coins: &mut self.player_coins,
             player_hands: &mut self.player_hands,
             player_cards_counter: &mut self.player_cards_counter,
             player_cards: &mut self.player_cards,
-            deck: &mut PopUnknownFromDeck { deck: &mut self.deck },
+            deck: &mut PopUnknownFromDeck {
+                deck: &mut self.deck,
+            },
             revealed_cards: &mut self.revealed_cards,
         });
         self.valid = matches!(result, Ok(..));
@@ -590,13 +668,20 @@ impl CardsTracker {
     pub fn after_player_action(&mut self, view: &PlayerView, action: &Action) {
         for game_state in self.game_states.iter_mut() {
             if game_state.deck.len() > view.deck {
-                let card = if let GamePlayerCards::Player(cards) = &game_state.player_cards[action.player] {
-                    view.cards.iter().zip(cards.iter())
+                let card = if let GamePlayerCards::Player(cards) =
+                    &game_state.player_cards[action.player]
+                {
+                    view.cards
+                        .iter()
+                        .zip(cards.iter())
                         .find(|(l, r)| **l != **r)
                         .map(|(view_card, _)| *view_card)
                         .unwrap_or_else(|| view.cards.last().unwrap().clone())
                 } else {
-                    panic!("Player has invalid kind of cards: {:?}", game_state.player_cards[action.player]);
+                    panic!(
+                        "Player has invalid kind of cards: {:?}",
+                        game_state.player_cards[action.player]
+                    );
                 };
                 if !game_state.deck.has_any() && !game_state.deck.contains_known(card) {
                     game_state.valid = false;
@@ -607,9 +692,7 @@ impl CardsTracker {
                 });
                 continue;
             }
-            game_state.with_default(|state| {
-                play_action(action, state, &mut ConstRng)
-            });
+            game_state.with_default(|state| play_action(action, state, &mut ConstRng));
         }
         self.game_states.sort();
         self.game_states.dedup();
@@ -619,13 +702,16 @@ impl CardsTracker {
 
     pub fn after_opponent_action(&mut self, view: &PlayerView, action_view: &ActionView) {
         for i in 0..self.game_states.len() {
-            if self.game_states[i].player_cards_counter[action_view.player] == view.player_cards[action_view.player] {
+            if self.game_states[i].player_cards_counter[action_view.player]
+                == view.player_cards[action_view.player]
+            {
                 let action_type = action_view.action_type.as_action_type();
-                let action = Action { player: action_view.player, action_type };
+                let action = Action {
+                    player: action_view.player,
+                    action_type,
+                };
                 let game_state = &mut self.game_states[i];
-                game_state.with_default(|state| {
-                    play_action(&action, state, &mut ConstRng)
-                });
+                game_state.with_default(|state| play_action(&action, state, &mut ConstRng));
                 continue;
             }
             if self.game_states[i].revealed_cards.len() != view.revealed_cards.len() {
@@ -633,27 +719,29 @@ impl CardsTracker {
                     ActionTypeView::RevealCard(card) => ActionType::RevealCard(card),
                     _ => unimplemented!(),
                 };
-                let action = Action { player: action_view.player, action_type };
+                let action = Action {
+                    player: action_view.player,
+                    action_type,
+                };
                 let game_state = &mut self.game_states[i];
-                game_state.with_default(|state| {
-                    play_action(&action, state, &mut ConstRng)
-                });
+                game_state.with_default(|state| play_action(&action, state, &mut ConstRng));
                 continue;
             }
             if self.game_states[i].deck.len() < view.deck {
                 for card in 0..self.game_states[i].player_cards[action_view.player].known_len() {
                     let action_type = match &action_view.action_type {
-                        ActionTypeView::DropCard => {
-                            ActionType::DropCard(self.game_states[i].player_cards[action_view.player].get_known(card))
-                        }
+                        ActionTypeView::DropCard => ActionType::DropCard(
+                            self.game_states[i].player_cards[action_view.player].get_known(card),
+                        ),
                         ActionTypeView::ShowCard(card) => ActionType::ShowCard(*card),
                         v => panic!("No conversion to ActionType for {:?}", v),
                     };
-                    let action = Action { player: action_view.player, action_type };
+                    let action = Action {
+                        player: action_view.player,
+                        action_type,
+                    };
                     let mut game_state = self.game_states[i].clone();
-                    game_state.with_default(|state| {
-                        play_action(&action, state, &mut ConstRng)
-                    });
+                    game_state.with_default(|state| play_action(&action, state, &mut ConstRng));
                     if game_state.valid {
                         self.game_states.push(game_state);
                     }
@@ -664,11 +752,12 @@ impl CardsTracker {
                         ActionTypeView::ShowCard(card) => ActionType::ShowCard(*card),
                         v => panic!("No conversion to ActionType for {:?}", v),
                     };
-                    let action = Action { player: action_view.player, action_type };
+                    let action = Action {
+                        player: action_view.player,
+                        action_type,
+                    };
                     let game_state = &mut self.game_states[i];
-                    game_state.with_default(|state| {
-                        play_action(&action, state, &mut ConstRng)
-                    });
+                    game_state.with_default(|state| play_action(&action, state, &mut ConstRng));
                 } else {
                     self.game_states[i].valid = false;
                 }
@@ -680,7 +769,10 @@ impl CardsTracker {
                         ActionTypeView::TakeCard => ActionType::TakeCard,
                         _ => unimplemented!(),
                     };
-                    let action = Action { player: action_view.player, action_type };
+                    let action = Action {
+                        player: action_view.player,
+                        action_type,
+                    };
                     let mut game_state = self.game_states[i].clone();
                     game_state.with_pop_known_from_deck(game_state.deck.known[card], |state| {
                         play_action(&action, state, &mut ConstRng)
@@ -694,7 +786,10 @@ impl CardsTracker {
                         ActionTypeView::TakeCard => ActionType::TakeCard,
                         _ => unimplemented!(),
                     };
-                    let action = Action { player: action_view.player, action_type };
+                    let action = Action {
+                        player: action_view.player,
+                        action_type,
+                    };
                     let game_state = &mut self.game_states[i];
                     game_state.with_pop_unknown_from_deck(|state| {
                         play_action(&action, state, &mut ConstRng)
@@ -713,10 +808,14 @@ impl CardsTracker {
     }
 
     pub fn is_safe_action_type(&self, player: usize, action_type: &ActionType) -> bool {
-        self.game_states.iter()
-            .all(|game_state| {
-                game_state.is_safe_action_type(player, action_type, self.last_action.as_ref(), self.cards_per_type)
-            })
+        self.game_states.iter().all(|game_state| {
+            game_state.is_safe_action_type(
+                player,
+                action_type,
+                self.last_action.as_ref(),
+                self.cards_per_type,
+            )
+        })
     }
 
     pub fn print(&self) {
@@ -744,16 +843,27 @@ impl HonestCarefulRandomBot {
 }
 
 impl Bot for HonestCarefulRandomBot {
-    fn suggest_actions<'a>(&mut self, view: &PlayerView, available_actions: &'a Vec<Action>) -> Vec<&'a Action> {
-        available_actions.iter()
+    fn suggest_actions<'a>(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &'a Vec<Action>,
+    ) -> Vec<&'a Action> {
+        available_actions
+            .iter()
             .filter(|action| {
                 is_honest_action_type(&action.action_type, view.cards)
-                    && self.cards_tracker.is_safe_action_type(view.player, &action.action_type)
+                    && self
+                        .cards_tracker
+                        .is_safe_action_type(view.player, &action.action_type)
             })
             .collect()
     }
 
-    fn suggest_optional_actions<'a>(&mut self, view: &PlayerView, available_actions: &'a Vec<Action>) -> Vec<&'a Action> {
+    fn suggest_optional_actions<'a>(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &'a Vec<Action>,
+    ) -> Vec<&'a Action> {
         self.suggest_actions(view, available_actions)
     }
 
@@ -761,10 +871,15 @@ impl Bot for HonestCarefulRandomBot {
         self.suggest_actions(view, available_actions)
             .choose(&mut self.rng)
             .map(|v| *v)
-            .unwrap().clone()
+            .unwrap()
+            .clone()
     }
 
-    fn get_optional_action(&mut self, view: &PlayerView, available_actions: &Vec<Action>) -> Option<Action> {
+    fn get_optional_action(
+        &mut self,
+        view: &PlayerView,
+        available_actions: &Vec<Action>,
+    ) -> Option<Action> {
         self.suggest_optional_actions(view, available_actions)
             .choose(&mut self.rng)
             .map(|v| (*v).clone())
@@ -799,10 +914,10 @@ fn is_honest_action_type(action_type: &ActionType, cards: &[Card]) -> bool {
         ActionType::Exchange => cards.contains(&Card::Ambassador),
         ActionType::Steal(..) => cards.contains(&Card::Captain),
         ActionType::BlockAssassination => cards.contains(&Card::Contessa),
-        ActionType::BlockSteal(card) | ActionType::ShowCard(card)
-        | ActionType::RevealCard(card) | ActionType::DropCard(card) => {
-            cards.contains(card)
-        }
+        ActionType::BlockSteal(card)
+        | ActionType::ShowCard(card)
+        | ActionType::RevealCard(card)
+        | ActionType::DropCard(card) => cards.contains(card),
         _ => true,
     }
 }
@@ -812,7 +927,9 @@ impl Deck for CardCollection {
         self.unknown + self.known.len()
     }
 
-    fn pop_card(&mut self) -> Card { unimplemented!() }
+    fn pop_card(&mut self) -> Card {
+        unimplemented!()
+    }
 
     fn push_card(&mut self, card: Card) {
         if matches!(card, Card::Unknown) {
@@ -840,9 +957,13 @@ impl<'a> Deck for PopKnownFromDeck<'a> {
         self.card
     }
 
-    fn push_card(&mut self, _: Card) { unimplemented!() }
+    fn push_card(&mut self, _: Card) {
+        unimplemented!()
+    }
 
-    fn shuffle<R: Rng>(&mut self, _: &mut R) { unimplemented!() }
+    fn shuffle<R: Rng>(&mut self, _: &mut R) {
+        unimplemented!()
+    }
 }
 
 struct PopUnknownFromDeck<'a> {
@@ -859,9 +980,13 @@ impl<'a> Deck for PopUnknownFromDeck<'a> {
         Card::Unknown
     }
 
-    fn push_card(&mut self, _: Card) { unimplemented!() }
+    fn push_card(&mut self, _: Card) {
+        unimplemented!()
+    }
 
-    fn shuffle<R: Rng>(&mut self, _: &mut R) { unimplemented!() }
+    fn shuffle<R: Rng>(&mut self, _: &mut R) {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
@@ -880,7 +1005,11 @@ mod tests {
             cards_per_type: 3,
         };
         for target_player in 0..settings.players_number {
-            let game_states = GameState::initial(target_player, &vec![Card::Captain, Card::Captain], &settings);
+            let game_states = GameState::initial(
+                target_player,
+                &vec![Card::Captain, Card::Captain],
+                &settings,
+            );
             assert_eq!(game_states.len(), 6);
             for game_state in game_states.iter() {
                 assert!(game_state.valid);
@@ -896,10 +1025,14 @@ mod tests {
                     assert_eq!(game_state.player_cards_counter[player], 2, "{}", player);
                     assert_eq!(game_state.player_cards[player].count(), 2, "{}", player);
                     if player != target_player {
-                        assert!(matches!(
-                            game_state.player_cards[player],
-                            GamePlayerCards::Opponent(..)
-                        ), "{:?}", game_state.player_cards[player]);
+                        assert!(
+                            matches!(
+                                game_state.player_cards[player],
+                                GamePlayerCards::Opponent(..)
+                            ),
+                            "{:?}",
+                            game_state.player_cards[player]
+                        );
                     }
                 }
                 assert_eq!(
@@ -917,7 +1050,8 @@ mod tests {
             cards_per_type: 3,
         };
         for target_player in 0..settings.players_number {
-            let game_states = GameState::initial(target_player, &vec![Card::Duke, Card::Captain], &settings);
+            let game_states =
+                GameState::initial(target_player, &vec![Card::Duke, Card::Captain], &settings);
             assert_eq!(game_states.len(), 385);
             for game_state in game_states.iter() {
                 assert!(game_state.valid);
@@ -933,10 +1067,14 @@ mod tests {
                     assert_eq!(game_state.player_cards_counter[player], 2, "{}", player);
                     assert_eq!(game_state.player_cards[player].count(), 2, "{}", player);
                     if player != target_player {
-                        assert!(matches!(
-                            game_state.player_cards[player],
-                            GamePlayerCards::Opponent(..)
-                        ), "{:?}", game_state.player_cards[player]);
+                        assert!(
+                            matches!(
+                                game_state.player_cards[player],
+                                GamePlayerCards::Opponent(..)
+                            ),
+                            "{:?}",
+                            game_state.player_cards[player]
+                        );
                     }
                 }
                 assert_eq!(
@@ -958,13 +1096,26 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         let mut game = Game::new(settings.clone(), &mut rng);
         let actions = [
-            Action { player: 0, action_type: ActionType::Exchange },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
+            Action {
+                player: 0,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
         ];
-        assert_eq!(play_actions(&actions, &mut game, &mut tracker, &mut rng), Ok(()));
-        assert_eq!(tracker.game_states, vec![
-            GameState {
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut tracker, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            tracker.game_states,
+            vec![GameState {
                 valid: true,
                 state_type: StateType::Turn { player: 1 },
                 player_coins: vec![2, 2],
@@ -972,12 +1123,18 @@ mod tests {
                 player_cards_counter: vec![1, 2],
                 player_cards: vec![
                     GamePlayerCards::Player(vec![Card::Assassin]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![], unknown: 2 }),
+                    GamePlayerCards::Opponent(CardCollection {
+                        known: vec![],
+                        unknown: 2
+                    }),
                 ],
                 revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![], unknown: 6 },
-            },
-        ]);
+                deck: CardCollection {
+                    known: vec![],
+                    unknown: 6
+                },
+            },]
+        );
     }
 
     #[test]
@@ -1004,14 +1161,30 @@ mod tests {
         let hand: Vec<Card> = game.get_player_view(0).cards.into();
         let mut tracker = CardsTracker::new(0, &hand, &settings);
         let actions = [
-            Action { player: 0, action_type: ActionType::Exchange },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Assassin) },
+            Action {
+                player: 0,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
         ];
-        assert_eq!(play_actions(&actions, &mut game, &mut tracker, &mut rng), Ok(()));
-        assert_eq!(tracker.game_states, vec![
-            GameState {
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut tracker, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            tracker.game_states,
+            vec![GameState {
                 valid: true,
                 state_type: StateType::Challenge {
                     current_player: 0,
@@ -1023,12 +1196,18 @@ mod tests {
                 player_cards_counter: vec![1, 1],
                 player_cards: vec![
                     GamePlayerCards::Player(vec![Card::Ambassador]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![], unknown: 1 }),
+                    GamePlayerCards::Opponent(CardCollection {
+                        known: vec![],
+                        unknown: 1
+                    }),
                 ],
                 revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![Card::Ambassador], unknown: 6 },
-            },
-        ]);
+                deck: CardCollection {
+                    known: vec![Card::Ambassador],
+                    unknown: 6
+                },
+            },]
+        );
     }
 
     #[test]
@@ -1055,29 +1234,60 @@ mod tests {
         let hand: Vec<Card> = game.get_player_view(0).cards.into();
         let mut tracker = CardsTracker::new(0, &hand, &settings);
         let actions = [
-            Action { player: 0, action_type: ActionType::Exchange },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Assassin) },
-            Action { player: 0, action_type: ActionType::ShuffleDeck },
-            Action { player: 0, action_type: ActionType::TakeCard },
+            Action {
+                player: 0,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
         ];
-        assert_eq!(play_actions(&actions, &mut game, &mut tracker, &mut rng), Ok(()));
-        assert_eq!(tracker.game_states, vec![
-            GameState {
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut tracker, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            tracker.game_states,
+            vec![GameState {
                 valid: true,
-                state_type: StateType::NeedCards { player: 0, count: 2 },
+                state_type: StateType::NeedCards {
+                    player: 0,
+                    count: 2
+                },
                 player_coins: vec![2, 2],
                 player_hands: vec![2, 1],
                 player_cards_counter: vec![2, 1],
                 player_cards: vec![
                     GamePlayerCards::Player(vec![Card::Ambassador, Card::Duke]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![], unknown: 1 }),
+                    GamePlayerCards::Opponent(CardCollection {
+                        known: vec![],
+                        unknown: 1
+                    }),
                 ],
                 revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![Card::Ambassador], unknown: 5 },
-            },
-        ]);
+                deck: CardCollection {
+                    known: vec![Card::Ambassador],
+                    unknown: 5
+                },
+            },]
+        );
     }
 
     #[test]
@@ -1104,20 +1314,54 @@ mod tests {
         let hand: Vec<Card> = game.get_player_view(0).cards.into();
         let mut tracker = CardsTracker::new(0, &hand, &settings);
         let actions = [
-            Action { player: 0, action_type: ActionType::Exchange },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Assassin) },
-            Action { player: 0, action_type: ActionType::ShuffleDeck },
-            Action { player: 0, action_type: ActionType::TakeCard },
-            Action { player: 0, action_type: ActionType::TakeCard },
-            Action { player: 0, action_type: ActionType::TakeCard },
-            Action { player: 0, action_type: ActionType::DropCard(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::DropCard(Card::Duke) },
+            Action {
+                player: 0,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::DropCard(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::DropCard(Card::Duke),
+            },
         ];
-        assert_eq!(play_actions(&actions, &mut game, &mut tracker, &mut rng), Ok(()));
-        assert_eq!(tracker.game_states, vec![
-            GameState {
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut tracker, &mut rng),
+            Ok(())
+        );
+        assert_eq!(
+            tracker.game_states,
+            vec![GameState {
                 valid: true,
                 state_type: StateType::Turn { player: 1 },
                 player_coins: vec![2, 2],
@@ -1125,12 +1369,18 @@ mod tests {
                 player_cards_counter: vec![2, 1],
                 player_cards: vec![
                     GamePlayerCards::Player(vec![Card::Captain, Card::Duke]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![], unknown: 1 }),
+                    GamePlayerCards::Opponent(CardCollection {
+                        known: vec![],
+                        unknown: 1
+                    }),
                 ],
                 revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![Card::Ambassador, Card::Ambassador, Card::Duke], unknown: 3 },
-            },
-        ]);
+                deck: CardCollection {
+                    known: vec![Card::Ambassador, Card::Ambassador, Card::Duke],
+                    unknown: 3
+                },
+            },]
+        );
     }
 
     #[test]
@@ -1157,49 +1407,101 @@ mod tests {
         let hand: Vec<Card> = game.get_player_view(0).cards.into();
         let mut tracker = CardsTracker::new(0, &hand, &settings);
         let actions = [
-            Action { player: 0, action_type: ActionType::Income },
-            Action { player: 1, action_type: ActionType::Exchange },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
-            Action { player: 1, action_type: ActionType::ShuffleDeck },
-            Action { player: 1, action_type: ActionType::TakeCard },
+            Action {
+                player: 0,
+                action_type: ActionType::Income,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
         ];
-        assert_eq!(play_actions(&actions, &mut game, &mut tracker, &mut rng), Ok(()));
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut tracker, &mut rng),
+            Ok(())
+        );
         for game_state in tracker.game_states.iter() {
             assert!(
-                matches!(game_state.state_type, StateType::NeedCards { player: 1, count: 2 }),
-                "{:?}", game_state.state_type
+                matches!(
+                    game_state.state_type,
+                    StateType::NeedCards {
+                        player: 1,
+                        count: 2
+                    }
+                ),
+                "{:?}",
+                game_state.state_type
             );
         }
-        assert_eq!(tracker.game_states, vec![
-            GameState {
-                valid: true,
-                state_type: StateType::NeedCards { player: 1, count: 2 },
-                player_coins: vec![3, 2],
-                player_hands: vec![1, 2],
-                player_cards_counter: vec![1, 2],
-                player_cards: vec![
-                    GamePlayerCards::Player(vec![Card::Assassin]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![], unknown: 2 }),
-                ],
-                revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![Card::Ambassador], unknown: 5 },
-            },
-            GameState {
-                valid: true,
-                state_type: StateType::NeedCards { player: 1, count: 2 },
-                player_coins: vec![3, 2],
-                player_hands: vec![1, 2],
-                player_cards_counter: vec![1, 2],
-                player_cards: vec![
-                    GamePlayerCards::Player(vec![Card::Assassin]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![Card::Ambassador], unknown: 1 }),
-                ],
-                revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![], unknown: 6 },
-            },
-        ]);
+        assert_eq!(
+            tracker.game_states,
+            vec![
+                GameState {
+                    valid: true,
+                    state_type: StateType::NeedCards {
+                        player: 1,
+                        count: 2
+                    },
+                    player_coins: vec![3, 2],
+                    player_hands: vec![1, 2],
+                    player_cards_counter: vec![1, 2],
+                    player_cards: vec![
+                        GamePlayerCards::Player(vec![Card::Assassin]),
+                        GamePlayerCards::Opponent(CardCollection {
+                            known: vec![],
+                            unknown: 2
+                        }),
+                    ],
+                    revealed_cards: vec![Card::Assassin],
+                    deck: CardCollection {
+                        known: vec![Card::Ambassador],
+                        unknown: 5
+                    },
+                },
+                GameState {
+                    valid: true,
+                    state_type: StateType::NeedCards {
+                        player: 1,
+                        count: 2
+                    },
+                    player_coins: vec![3, 2],
+                    player_hands: vec![1, 2],
+                    player_cards_counter: vec![1, 2],
+                    player_cards: vec![
+                        GamePlayerCards::Player(vec![Card::Assassin]),
+                        GamePlayerCards::Opponent(CardCollection {
+                            known: vec![Card::Ambassador],
+                            unknown: 1
+                        }),
+                    ],
+                    revealed_cards: vec![Card::Assassin],
+                    deck: CardCollection {
+                        known: vec![],
+                        unknown: 6
+                    },
+                },
+            ]
+        );
     }
 
     #[test]
@@ -1226,56 +1528,113 @@ mod tests {
         let hand: Vec<Card> = game.get_player_view(0).cards.into();
         let mut tracker = CardsTracker::new(0, &hand, &settings);
         let actions = [
-            Action { player: 0, action_type: ActionType::Income },
-            Action { player: 1, action_type: ActionType::Exchange },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
-            Action { player: 1, action_type: ActionType::ShuffleDeck },
-            Action { player: 1, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::DropCard(Card::Duke) },
-            Action { player: 1, action_type: ActionType::DropCard(Card::Captain) },
+            Action {
+                player: 0,
+                action_type: ActionType::Income,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::DropCard(Card::Duke),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::DropCard(Card::Captain),
+            },
         ];
-        assert_eq!(play_actions(&actions, &mut game, &mut tracker, &mut rng), Ok(()));
+        assert_eq!(
+            play_actions(&actions, &mut game, &mut tracker, &mut rng),
+            Ok(())
+        );
         for game_state in tracker.game_states.iter() {
             assert!(
                 matches!(game_state.state_type, StateType::Turn { player: 0 }),
-                "{:?}", game_state.state_type
+                "{:?}",
+                game_state.state_type
             );
         }
-        assert_eq!(tracker.game_states, vec![
-            GameState {
-                valid: true,
-                state_type: StateType::Turn { player: 0 },
-                player_coins: vec![3, 2],
-                player_hands: vec![1, 2],
-                player_cards_counter: vec![1, 2],
-                player_cards: vec![
-                    GamePlayerCards::Player(vec![Card::Assassin]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![], unknown: 2 }),
-                ],
-                revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![Card::Ambassador], unknown: 5 },
-            },
-            GameState {
-                valid: true,
-                state_type: StateType::Turn { player: 0 },
-                player_coins: vec![3, 2],
-                player_hands: vec![1, 2],
-                player_cards_counter: vec![1, 2],
-                player_cards: vec![
-                    GamePlayerCards::Player(vec![Card::Assassin]),
-                    GamePlayerCards::Opponent(CardCollection { known: vec![Card::Ambassador], unknown: 1 }),
-                ],
-                revealed_cards: vec![Card::Assassin],
-                deck: CardCollection { known: vec![], unknown: 6 },
-            },
-        ]);
+        assert_eq!(
+            tracker.game_states,
+            vec![
+                GameState {
+                    valid: true,
+                    state_type: StateType::Turn { player: 0 },
+                    player_coins: vec![3, 2],
+                    player_hands: vec![1, 2],
+                    player_cards_counter: vec![1, 2],
+                    player_cards: vec![
+                        GamePlayerCards::Player(vec![Card::Assassin]),
+                        GamePlayerCards::Opponent(CardCollection {
+                            known: vec![],
+                            unknown: 2
+                        }),
+                    ],
+                    revealed_cards: vec![Card::Assassin],
+                    deck: CardCollection {
+                        known: vec![Card::Ambassador],
+                        unknown: 5
+                    },
+                },
+                GameState {
+                    valid: true,
+                    state_type: StateType::Turn { player: 0 },
+                    player_coins: vec![3, 2],
+                    player_hands: vec![1, 2],
+                    player_cards_counter: vec![1, 2],
+                    player_cards: vec![
+                        GamePlayerCards::Player(vec![Card::Assassin]),
+                        GamePlayerCards::Opponent(CardCollection {
+                            known: vec![Card::Ambassador],
+                            unknown: 1
+                        }),
+                    ],
+                    revealed_cards: vec![Card::Assassin],
+                    deck: CardCollection {
+                        known: vec![],
+                        unknown: 6
+                    },
+                },
+            ]
+        );
     }
 
-    fn play_actions<R: Rng>(actions: &[Action], game: &mut Game, tracker: &mut CardsTracker, rng: &mut R) -> Result<(), String> {
+    fn play_actions<R: Rng>(
+        actions: &[Action],
+        game: &mut Game,
+        tracker: &mut CardsTracker,
+        rng: &mut R,
+    ) -> Result<(), String> {
         for i in 0..actions.len() {
             game.print();
             let action = &actions[i];
@@ -1286,7 +1645,10 @@ mod tests {
             if action.player == 0 {
                 tracker.after_player_action(&game.get_player_view(0), action);
             } else {
-                tracker.after_opponent_action(&game.get_player_view(0), &ActionView::from_action(&action));
+                tracker.after_opponent_action(
+                    &game.get_player_view(0),
+                    &ActionView::from_action(&action),
+                );
             }
         }
         game.print();

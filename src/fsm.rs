@@ -2,8 +2,8 @@ use std::rc::Rc;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use rand::Rng;
 use rand::seq::SliceRandom;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 pub const CARDS_PER_PLAYER: usize = 2;
@@ -182,7 +182,8 @@ impl PlayerCards for Vec<Card> {
     }
 
     fn drop_card(&mut self, card: Card) {
-        let index = self.iter()
+        let index = self
+            .iter()
             .find_position(|v| **v == card)
             .map(|(index, _)| index)
             .unwrap();
@@ -226,10 +227,16 @@ pub struct State<'a, P: PlayerCards + Sized, D: Deck> {
     pub revealed_cards: &'a mut Vec<Card>,
 }
 
-pub fn play_action<'a, P, D, R>(action: &Action, state: &mut State<'a, P, D>, rng: &mut R) -> Result<(), Error>
-    where P: PlayerCards,
-          D: Deck,
-          R: Rng {
+pub fn play_action<'a, P, D, R>(
+    action: &Action,
+    state: &mut State<'a, P, D>,
+    rng: &mut R,
+) -> Result<(), Error>
+where
+    P: PlayerCards,
+    D: Deck,
+    R: Rng,
+{
     if state.player_hands[action.player] == 0 {
         return Err(Error::InactivePlayer);
     }
@@ -246,43 +253,101 @@ pub fn play_action<'a, P, D, R>(action: &Action, state: &mut State<'a, P, D>, rn
         StateType::Exchange { player } => {
             on_exchange(*player, state.player_hands, state.deck, action)
         }
-        StateType::Assassination { player, target, can_challenge } => {
-            on_assassination(*player, *target, *can_challenge, state.player_hands, action)
-        }
-        StateType::Steal { player, target, can_challenge } => {
-            on_steal(*player, *target, *can_challenge, state.player_coins, state.player_hands, action)
-        }
-        StateType::Challenge { current_player, source, state: challenge_state } => {
-            on_challenge(*current_player, source, challenge_state, state.player_coins, state.player_hands, state.player_cards_counter, state.player_cards, state.deck, state.revealed_cards, action, rng)
-        }
+        StateType::Assassination {
+            player,
+            target,
+            can_challenge,
+        } => on_assassination(*player, *target, *can_challenge, state.player_hands, action),
+        StateType::Steal {
+            player,
+            target,
+            can_challenge,
+        } => on_steal(
+            *player,
+            *target,
+            *can_challenge,
+            state.player_coins,
+            state.player_hands,
+            action,
+        ),
+        StateType::Challenge {
+            current_player,
+            source,
+            state: challenge_state,
+        } => on_challenge(
+            *current_player,
+            source,
+            challenge_state,
+            state.player_coins,
+            state.player_hands,
+            state.player_cards_counter,
+            state.player_cards,
+            state.deck,
+            state.revealed_cards,
+            action,
+            rng,
+        ),
         StateType::BlockForeignAid { player, target } => {
             on_block_foreign_aid(*player, *target, state.player_hands, action)
         }
-        StateType::NeedCards { player, count } => {
-            on_need_cards(*player, *count, state.player_hands, state.player_cards_counter, state.player_cards, state.deck, action)
-        }
-        StateType::TookCards { player, count } => {
-            on_took_cards(*player, *count, state.player_hands, state.player_cards_counter, state.player_cards, state.deck, action)
-        }
-        StateType::DroppedCard { player, left } => {
-            on_dropped_cards(*player, *left, state.player_hands, state.player_cards_counter, state.player_cards, state.deck, action)
-        }
+        StateType::NeedCards { player, count } => on_need_cards(
+            *player,
+            *count,
+            state.player_hands,
+            state.player_cards_counter,
+            state.player_cards,
+            state.deck,
+            action,
+        ),
+        StateType::TookCards { player, count } => on_took_cards(
+            *player,
+            *count,
+            state.player_hands,
+            state.player_cards_counter,
+            state.player_cards,
+            state.deck,
+            action,
+        ),
+        StateType::DroppedCard { player, left } => on_dropped_cards(
+            *player,
+            *left,
+            state.player_hands,
+            state.player_cards_counter,
+            state.player_cards,
+            state.deck,
+            action,
+        ),
         StateType::BlockAssassination { player, target } => {
             on_block_assassination(*player, *target, state.player_hands, action)
         }
-        StateType::BlockSteal { player, target, card } => {
-            on_block_steal(*player, *target, *card, state.player_hands, action)
-        }
-        StateType::LostInfluence { player, current_player } => {
-            on_lost_influence(*player, *current_player, state.player_hands, state.player_cards_counter, state.player_cards, state.revealed_cards, action)
-        }
+        StateType::BlockSteal {
+            player,
+            target,
+            card,
+        } => on_block_steal(*player, *target, *card, state.player_hands, action),
+        StateType::LostInfluence {
+            player,
+            current_player,
+        } => on_lost_influence(
+            *player,
+            *current_player,
+            state.player_hands,
+            state.player_cards_counter,
+            state.player_cards,
+            state.revealed_cards,
+            action,
+        ),
     }?;
     *state.state_type = new_state_type;
     Ok(())
 }
 
-fn on_turn(player: usize, player_coins: &mut [usize], player_hands: &[usize],
-           action: &Action) -> Result<StateType, Error> {
+fn on_turn(
+    player: usize,
+    player_coins: &mut [usize],
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     if player != action.player {
         return Err(Error::InvalidPlayer);
     }
@@ -292,7 +357,9 @@ fn on_turn(player: usize, player_coins: &mut [usize], player_hands: &[usize],
     match &action.action_type {
         ActionType::Income => {
             player_coins[player] += INCOME;
-            Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(player, player_hands),
+            })
         }
         ActionType::ForeignAid => Ok(StateType::ForeignAid { player }),
         ActionType::Tax => Ok(StateType::Tax { player }),
@@ -318,47 +385,70 @@ fn on_turn(player: usize, player_coins: &mut [usize], player_hands: &[usize],
                 return Err(Error::NotEnoughCoins);
             }
             player_coins[player] -= ASSASSINATION_COST;
-            Ok(StateType::Assassination { player, target: *target, can_challenge: true })
+            Ok(StateType::Assassination {
+                player,
+                target: *target,
+                can_challenge: true,
+            })
         }
         ActionType::Steal(target) => {
             if *target == player || player_hands[*target] == 0 {
                 return Err(Error::InvalidTarget);
             }
-            Ok(StateType::Steal { player, target: *target, can_challenge: true })
+            Ok(StateType::Steal {
+                player,
+                target: *target,
+                can_challenge: true,
+            })
         }
         _ => return Err(Error::InvalidAction),
     }
 }
 
-fn on_foreign_aid(player: usize, player_coins: &mut [usize], player_hands: &[usize],
-                  action: &Action) -> Result<StateType, Error> {
+fn on_foreign_aid(
+    player: usize,
+    player_coins: &mut [usize],
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     match &action.action_type {
         ActionType::PassBlock => {
             if player != action.player {
                 return Err(Error::InvalidPlayer);
             }
             player_coins[player] += FOREIGN_AID;
-            Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(player, player_hands),
+            })
         }
         ActionType::BlockForeignAid => {
             if player == action.player {
                 return Err(Error::InvalidTarget);
             }
-            Ok(StateType::BlockForeignAid { player: action.player, target: player })
+            Ok(StateType::BlockForeignAid {
+                player: action.player,
+                target: player,
+            })
         }
         _ => return Err(Error::InvalidAction),
     }
 }
 
-fn on_tax(player: usize, player_coins: &mut [usize], player_hands: &[usize],
-          action: &Action) -> Result<StateType, Error> {
+fn on_tax(
+    player: usize,
+    player_coins: &mut [usize],
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     match &action.action_type {
         ActionType::PassChallenge => {
             if player != action.player {
                 return Err(Error::InvalidPlayer);
             }
             player_coins[player] += TAX;
-            Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(player, player_hands),
+            })
         }
         ActionType::Challenge => {
             if player == action.player {
@@ -366,7 +456,11 @@ fn on_tax(player: usize, player_coins: &mut [usize], player_hands: &[usize],
             }
             Ok(StateType::Challenge {
                 current_player: player,
-                state: ChallengeState::Initial { initiator: action.player, target: player, card: Card::Duke },
+                state: ChallengeState::Initial {
+                    initiator: action.player,
+                    target: player,
+                    card: Card::Duke,
+                },
                 source: Rc::new(StateType::Tax { player }),
             })
         }
@@ -374,8 +468,12 @@ fn on_tax(player: usize, player_coins: &mut [usize], player_hands: &[usize],
     }
 }
 
-fn on_exchange<D: Deck>(player: usize, player_hands: &[usize], deck: &D,
-                        action: &Action) -> Result<StateType, Error> {
+fn on_exchange<D: Deck>(
+    player: usize,
+    player_hands: &[usize],
+    deck: &D,
+    action: &Action,
+) -> Result<StateType, Error> {
     match &action.action_type {
         ActionType::PassChallenge => {
             if player != action.player {
@@ -389,7 +487,11 @@ fn on_exchange<D: Deck>(player: usize, player_hands: &[usize], deck: &D,
             }
             Ok(StateType::Challenge {
                 current_player: player,
-                state: ChallengeState::Initial { initiator: action.player, target: player, card: Card::Ambassador },
+                state: ChallengeState::Initial {
+                    initiator: action.player,
+                    target: player,
+                    card: Card::Ambassador,
+                },
                 source: Rc::new(StateType::Exchange { player }),
             })
         }
@@ -397,15 +499,24 @@ fn on_exchange<D: Deck>(player: usize, player_hands: &[usize], deck: &D,
     }
 }
 
-fn on_assassination(player: usize, target: usize, can_challenge: bool, player_hands: &[usize],
-                    action: &Action) -> Result<StateType, Error> {
+fn on_assassination(
+    player: usize,
+    target: usize,
+    can_challenge: bool,
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     if can_challenge {
         match &action.action_type {
             ActionType::PassChallenge => {
                 if player != action.player {
                     return Err(Error::InvalidPlayer);
                 }
-                Ok(StateType::Assassination { player, target, can_challenge: false })
+                Ok(StateType::Assassination {
+                    player,
+                    target,
+                    can_challenge: false,
+                })
             }
             ActionType::Challenge => {
                 if player == action.player {
@@ -413,8 +524,16 @@ fn on_assassination(player: usize, target: usize, can_challenge: bool, player_ha
                 }
                 Ok(StateType::Challenge {
                     current_player: player,
-                    state: ChallengeState::Initial { initiator: action.player, target: player, card: Card::Assassin },
-                    source: Rc::new(StateType::Assassination { player, target, can_challenge: true }),
+                    state: ChallengeState::Initial {
+                        initiator: action.player,
+                        target: player,
+                        card: Card::Assassin,
+                    },
+                    source: Rc::new(StateType::Assassination {
+                        player,
+                        target,
+                        can_challenge: true,
+                    }),
                 })
             }
             _ => return Err(Error::InvalidAction),
@@ -426,31 +545,49 @@ fn on_assassination(player: usize, target: usize, can_challenge: bool, player_ha
                     return Err(Error::InvalidPlayer);
                 }
                 if player_hands[target] == 0 {
-                    Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+                    Ok(StateType::Turn {
+                        player: get_next_player(player, player_hands),
+                    })
                 } else {
-                    Ok(StateType::LostInfluence { player: target, current_player: player })
+                    Ok(StateType::LostInfluence {
+                        player: target,
+                        current_player: player,
+                    })
                 }
             }
             ActionType::BlockAssassination => {
                 if player == action.player || target != action.player {
                     return Err(Error::InvalidTarget);
                 }
-                Ok(StateType::BlockAssassination { player: action.player, target: player })
+                Ok(StateType::BlockAssassination {
+                    player: action.player,
+                    target: player,
+                })
             }
             _ => Err(Error::InvalidAction),
         }
     }
 }
 
-fn on_steal(player: usize, target: usize, can_challenge: bool, player_coins: &mut [usize],
-            player_hands: &[usize], action: &Action) -> Result<StateType, Error> {
+fn on_steal(
+    player: usize,
+    target: usize,
+    can_challenge: bool,
+    player_coins: &mut [usize],
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     if can_challenge {
         match &action.action_type {
             ActionType::PassChallenge => {
                 if player != action.player {
                     return Err(Error::InvalidPlayer);
                 }
-                Ok(StateType::Steal { player, target, can_challenge: false })
+                Ok(StateType::Steal {
+                    player,
+                    target,
+                    can_challenge: false,
+                })
             }
             ActionType::Challenge => {
                 if player == action.player {
@@ -458,8 +595,16 @@ fn on_steal(player: usize, target: usize, can_challenge: bool, player_coins: &mu
                 }
                 Ok(StateType::Challenge {
                     current_player: player,
-                    state: ChallengeState::Initial { initiator: action.player, target: player, card: Card::Captain },
-                    source: Rc::new(StateType::Steal { player, target, can_challenge: true }),
+                    state: ChallengeState::Initial {
+                        initiator: action.player,
+                        target: player,
+                        card: Card::Captain,
+                    },
+                    source: Rc::new(StateType::Steal {
+                        player,
+                        target,
+                        can_challenge: true,
+                    }),
                 })
             }
             _ => Err(Error::InvalidAction),
@@ -473,7 +618,9 @@ fn on_steal(player: usize, target: usize, can_challenge: bool, player_coins: &mu
                 let coins = player_coins[target].min(MAX_STEAL);
                 player_coins[target] -= coins;
                 player_coins[player] += coins;
-                Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+                Ok(StateType::Turn {
+                    player: get_next_player(player, player_hands),
+                })
             }
             ActionType::BlockSteal(card) => {
                 if player == action.player || target != action.player {
@@ -482,70 +629,114 @@ fn on_steal(player: usize, target: usize, can_challenge: bool, player_coins: &mu
                 if !matches!(card, Card::Ambassador | Card::Captain) {
                     return Err(Error::InvalidCard);
                 }
-                Ok(StateType::BlockSteal { player: action.player, target: player, card: *card })
+                Ok(StateType::BlockSteal {
+                    player: action.player,
+                    target: player,
+                    card: *card,
+                })
             }
             _ => Err(Error::InvalidAction),
         }
     }
 }
 
-fn on_challenge<P, D, R>(current_player: usize, source: &Rc<StateType>, state: &ChallengeState, player_coins: &mut [usize],
-                         player_hands: &mut [usize], player_cards_counter: &mut [usize], player_cards: &mut [P], deck: &mut D,
-                         revealed_cards: &mut Vec<Card>, action: &Action, rng: &mut R) -> Result<StateType, Error>
-    where P: PlayerCards,
-          D: Deck,
-          R: Rng {
-    match play_challenge_action(state, player_hands, player_cards_counter, player_cards, deck, revealed_cards, action, rng)? {
+fn on_challenge<P, D, R>(
+    current_player: usize,
+    source: &Rc<StateType>,
+    state: &ChallengeState,
+    player_coins: &mut [usize],
+    player_hands: &mut [usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    revealed_cards: &mut Vec<Card>,
+    action: &Action,
+    rng: &mut R,
+) -> Result<StateType, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+    R: Rng,
+{
+    match play_challenge_action(
+        state,
+        player_hands,
+        player_cards_counter,
+        player_cards,
+        deck,
+        revealed_cards,
+        action,
+        rng,
+    )? {
         ChallengeState::TookCard => match &**source {
             StateType::Tax { player } => {
                 player_coins[*player] += TAX;
-                Ok(StateType::Turn { player: get_next_player(current_player, player_hands) })
+                Ok(StateType::Turn {
+                    player: get_next_player(current_player, player_hands),
+                })
             }
-            StateType::BlockForeignAid { .. } | StateType::BlockAssassination { .. }
-            | StateType::BlockSteal { .. } => {
-                Ok(StateType::Turn { player: get_next_player(current_player, player_hands) })
-            }
-            StateType::Exchange { player } => {
-                start_exchange(*player, player_hands, deck)
-            }
-            StateType::Assassination { player, target, .. } => {
-                Ok(StateType::Assassination { player: *player, target: *target, can_challenge: false })
-            }
-            StateType::Steal { player, target, .. } => {
-                Ok(StateType::Steal { player: *player, target: *target, can_challenge: false })
-            }
+            StateType::BlockForeignAid { .. }
+            | StateType::BlockAssassination { .. }
+            | StateType::BlockSteal { .. } => Ok(StateType::Turn {
+                player: get_next_player(current_player, player_hands),
+            }),
+            StateType::Exchange { player } => start_exchange(*player, player_hands, deck),
+            StateType::Assassination { player, target, .. } => Ok(StateType::Assassination {
+                player: *player,
+                target: *target,
+                can_challenge: false,
+            }),
+            StateType::Steal { player, target, .. } => Ok(StateType::Steal {
+                player: *player,
+                target: *target,
+                can_challenge: false,
+            }),
             _ => Err(Error::InvalidSource),
         },
         ChallengeState::TargetRevealedCard => match &**source {
             StateType::BlockForeignAid { target, .. } => {
                 Ok(StateType::ForeignAid { player: *target })
             }
-            StateType::BlockAssassination { player, target, .. } => {
-                Ok(StateType::Assassination { player: *target, target: *player, can_challenge: false })
-            }
-            StateType::BlockSteal { player, target, .. } => {
-                Ok(StateType::Steal { player: *target, target: *player, can_challenge: false })
-            }
-            StateType::Tax { .. } | StateType::Exchange { .. }
-            | StateType::Assassination { .. } | StateType::Steal { .. } => {
-                Ok(StateType::Turn { player: get_next_player(current_player, player_hands) })
-            }
+            StateType::BlockAssassination { player, target, .. } => Ok(StateType::Assassination {
+                player: *target,
+                target: *player,
+                can_challenge: false,
+            }),
+            StateType::BlockSteal { player, target, .. } => Ok(StateType::Steal {
+                player: *target,
+                target: *player,
+                can_challenge: false,
+            }),
+            StateType::Tax { .. }
+            | StateType::Exchange { .. }
+            | StateType::Assassination { .. }
+            | StateType::Steal { .. } => Ok(StateType::Turn {
+                player: get_next_player(current_player, player_hands),
+            }),
             _ => Err(Error::InvalidSource),
-        }
-        v => {
-            Ok(StateType::Challenge { current_player, state: v, source: source.clone() })
-        }
+        },
+        v => Ok(StateType::Challenge {
+            current_player,
+            state: v,
+            source: source.clone(),
+        }),
     }
 }
 
-fn on_block_foreign_aid(player: usize, target: usize, player_hands: &[usize],
-                        action: &Action) -> Result<StateType, Error> {
+fn on_block_foreign_aid(
+    player: usize,
+    target: usize,
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     match &action.action_type {
         ActionType::PassChallenge => {
             if player != action.player {
                 return Err(Error::InvalidPlayer);
             }
-            Ok(StateType::Turn { player: get_next_player(target, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(target, player_hands),
+            })
         }
         ActionType::Challenge => {
             if player == action.player {
@@ -553,7 +744,11 @@ fn on_block_foreign_aid(player: usize, target: usize, player_hands: &[usize],
             }
             Ok(StateType::Challenge {
                 current_player: target,
-                state: ChallengeState::Initial { initiator: action.player, target: player, card: Card::Duke },
+                state: ChallengeState::Initial {
+                    initiator: action.player,
+                    target: player,
+                    card: Card::Duke,
+                },
                 source: Rc::new(StateType::BlockForeignAid { player, target }),
             })
         }
@@ -561,11 +756,19 @@ fn on_block_foreign_aid(player: usize, target: usize, player_hands: &[usize],
     }
 }
 
-fn on_need_cards<P, D>(player: usize, count: usize, player_hands: &[usize],
-                       player_cards_counter: &mut [usize], player_cards: &mut [P], deck: &mut D,
-                       action: &Action) -> Result<StateType, Error>
-    where P: PlayerCards,
-          D: Deck {
+fn on_need_cards<P, D>(
+    player: usize,
+    count: usize,
+    player_hands: &[usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    action: &Action,
+) -> Result<StateType, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+{
     if player != action.player {
         return Err(Error::InvalidPlayer);
     }
@@ -574,19 +777,34 @@ fn on_need_cards<P, D>(player: usize, count: usize, player_hands: &[usize],
             player_cards[player].add_card(deck.pop_card());
             player_cards_counter[player] += 1;
             if count == 1 {
-                Ok(StateType::TookCards { player, count: player_cards_counter[player] - player_hands[player] })
+                Ok(StateType::TookCards {
+                    player,
+                    count: player_cards_counter[player] - player_hands[player],
+                })
             } else {
-                Ok(StateType::NeedCards { player, count: count - 1 })
+                Ok(StateType::NeedCards {
+                    player,
+                    count: count - 1,
+                })
             }
         }
         _ => Err(Error::InvalidAction),
     }
 }
 
-fn on_took_cards<P, D>(player: usize, count: usize, player_hands: &[usize], player_cards_counter: &mut [usize],
-                       player_cards: &mut [P], deck: &mut D, action: &Action) -> Result<StateType, Error>
-    where P: PlayerCards,
-          D: Deck {
+fn on_took_cards<P, D>(
+    player: usize,
+    count: usize,
+    player_hands: &[usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    action: &Action,
+) -> Result<StateType, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+{
     match &action.action_type {
         ActionType::DropCard(card) => {
             if player != action.player {
@@ -599,19 +817,33 @@ fn on_took_cards<P, D>(player: usize, count: usize, player_hands: &[usize], play
             player_cards_counter[player] -= 1;
             deck.push_card(*card);
             if count == 1 {
-                Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+                Ok(StateType::Turn {
+                    player: get_next_player(player, player_hands),
+                })
             } else {
-                Ok(StateType::TookCards { player, count: count - 1 })
+                Ok(StateType::TookCards {
+                    player,
+                    count: count - 1,
+                })
             }
         }
         _ => Err(Error::InvalidAction),
     }
 }
 
-fn on_dropped_cards<P, D>(player: usize, left: usize, player_hands: &[usize], player_cards_counter: &mut [usize],
-                          player_cards: &mut [P], deck: &mut D, action: &Action) -> Result<StateType, Error>
-    where P: PlayerCards,
-          D: Deck {
+fn on_dropped_cards<P, D>(
+    player: usize,
+    left: usize,
+    player_hands: &[usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    action: &Action,
+) -> Result<StateType, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+{
     match &action.action_type {
         ActionType::DropCard(card) => {
             if player != action.player {
@@ -624,23 +856,34 @@ fn on_dropped_cards<P, D>(player: usize, left: usize, player_hands: &[usize], pl
             player_cards_counter[player] -= 1;
             deck.push_card(*card);
             if left == 1 {
-                Ok(StateType::Turn { player: get_next_player(player, player_hands) })
+                Ok(StateType::Turn {
+                    player: get_next_player(player, player_hands),
+                })
             } else {
-                Ok(StateType::DroppedCard { player, left: left - 1 })
+                Ok(StateType::DroppedCard {
+                    player,
+                    left: left - 1,
+                })
             }
         }
         _ => Err(Error::InvalidAction),
     }
 }
 
-fn on_block_assassination(player: usize, target: usize, player_hands: &[usize],
-                          action: &Action) -> Result<StateType, Error> {
+fn on_block_assassination(
+    player: usize,
+    target: usize,
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     match &action.action_type {
         ActionType::PassChallenge => {
             if player != action.player {
                 return Err(Error::InvalidPlayer);
             }
-            Ok(StateType::Turn { player: get_next_player(target, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(target, player_hands),
+            })
         }
         ActionType::Challenge => {
             if player == action.player {
@@ -648,7 +891,11 @@ fn on_block_assassination(player: usize, target: usize, player_hands: &[usize],
             }
             Ok(StateType::Challenge {
                 current_player: target,
-                state: ChallengeState::Initial { initiator: action.player, target: player, card: Card::Contessa },
+                state: ChallengeState::Initial {
+                    initiator: action.player,
+                    target: player,
+                    card: Card::Contessa,
+                },
                 source: Rc::new(StateType::BlockAssassination { player, target }),
             })
         }
@@ -656,14 +903,21 @@ fn on_block_assassination(player: usize, target: usize, player_hands: &[usize],
     }
 }
 
-fn on_block_steal(player: usize, target: usize, card: Card, player_hands: &[usize],
-                  action: &Action) -> Result<StateType, Error> {
+fn on_block_steal(
+    player: usize,
+    target: usize,
+    card: Card,
+    player_hands: &[usize],
+    action: &Action,
+) -> Result<StateType, Error> {
     match &action.action_type {
         ActionType::PassChallenge => {
             if player != action.player {
                 return Err(Error::InvalidPlayer);
             }
-            Ok(StateType::Turn { player: get_next_player(target, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(target, player_hands),
+            })
         }
         ActionType::Challenge => {
             if player == action.player {
@@ -671,18 +925,34 @@ fn on_block_steal(player: usize, target: usize, card: Card, player_hands: &[usiz
             }
             Ok(StateType::Challenge {
                 current_player: target,
-                state: ChallengeState::Initial { initiator: action.player, target: player, card },
-                source: Rc::new(StateType::BlockSteal { player, target, card }),
+                state: ChallengeState::Initial {
+                    initiator: action.player,
+                    target: player,
+                    card,
+                },
+                source: Rc::new(StateType::BlockSteal {
+                    player,
+                    target,
+                    card,
+                }),
             })
         }
         _ => Err(Error::InvalidAction),
     }
 }
 
-fn on_lost_influence<P>(player: usize, current_turn_player: usize, player_hands: &mut [usize],
-                        player_cards_counter: &mut [usize], player_cards: &mut [P],
-                        revealed_cards: &mut Vec<Card>, action: &Action) -> Result<StateType, Error>
-    where P: PlayerCards {
+fn on_lost_influence<P>(
+    player: usize,
+    current_turn_player: usize,
+    player_hands: &mut [usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    revealed_cards: &mut Vec<Card>,
+    action: &Action,
+) -> Result<StateType, Error>
+where
+    P: PlayerCards,
+{
     match &action.action_type {
         ActionType::RevealCard(card) => {
             if player != action.player {
@@ -695,15 +965,23 @@ fn on_lost_influence<P>(player: usize, current_turn_player: usize, player_hands:
             player_hands[player] -= 1;
             player_cards_counter[player] -= 1;
             revealed_cards.push(*card);
-            Ok(StateType::Turn { player: get_next_player(current_turn_player, player_hands) })
+            Ok(StateType::Turn {
+                player: get_next_player(current_turn_player, player_hands),
+            })
         }
         _ => Err(Error::InvalidAction),
     }
 }
 
-fn start_exchange<D: Deck>(player: usize, player_hands: &[usize], deck: &D) -> Result<StateType, Error> {
+fn start_exchange<D: Deck>(
+    player: usize,
+    player_hands: &[usize],
+    deck: &D,
+) -> Result<StateType, Error> {
     match MAX_CARDS_TO_EXCHANGE.min(deck.count()) {
-        0 => Ok(StateType::Turn { player: get_next_player(player, player_hands) }),
+        0 => Ok(StateType::Turn {
+            player: get_next_player(player, player_hands),
+        }),
         count => Ok(StateType::NeedCards { player, count }),
     }
 }
@@ -736,19 +1014,46 @@ pub enum ChallengeState {
     TargetRevealedCard,
 }
 
-fn play_challenge_action<P, D, R>(state: &ChallengeState, player_hands: &mut [usize], player_cards_counter: &mut [usize],
-                                  player_cards: &mut [P], deck: &mut D, revealed_cards: &mut Vec<Card>,
-                                  action: &Action, rng: &mut R) -> Result<ChallengeState, Error>
-    where P: PlayerCards,
-          D: Deck,
-          R: Rng {
+fn play_challenge_action<P, D, R>(
+    state: &ChallengeState,
+    player_hands: &mut [usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    revealed_cards: &mut Vec<Card>,
+    action: &Action,
+    rng: &mut R,
+) -> Result<ChallengeState, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+    R: Rng,
+{
     match state {
-        ChallengeState::Initial { initiator, target, card } => {
-            on_challenge_initial(*initiator, *target, *card, player_hands, player_cards_counter, player_cards, deck, revealed_cards, action)
-        }
-        ChallengeState::ShownCard { initiator, target } => {
-            on_challenge_shown_card(*initiator, *target, player_hands, player_cards_counter, player_cards, revealed_cards, action)
-        }
+        ChallengeState::Initial {
+            initiator,
+            target,
+            card,
+        } => on_challenge_initial(
+            *initiator,
+            *target,
+            *card,
+            player_hands,
+            player_cards_counter,
+            player_cards,
+            deck,
+            revealed_cards,
+            action,
+        ),
+        ChallengeState::ShownCard { initiator, target } => on_challenge_shown_card(
+            *initiator,
+            *target,
+            player_hands,
+            player_cards_counter,
+            player_cards,
+            revealed_cards,
+            action,
+        ),
         ChallengeState::InitiatorRevealedCard { target } => {
             on_challenge_initiator_revealed_card(*target, deck, action, rng)
         }
@@ -759,11 +1064,21 @@ fn play_challenge_action<P, D, R>(state: &ChallengeState, player_hands: &mut [us
     }
 }
 
-fn on_challenge_initial<P, D>(initiator: usize, target: usize, card: Card, player_hands: &mut [usize],
-                              player_cards_counter: &mut [usize], player_cards: &mut [P], deck: &mut D,
-                              revealed_cards: &mut Vec<Card>, action: &Action) -> Result<ChallengeState, Error>
-    where P: PlayerCards,
-          D: Deck {
+fn on_challenge_initial<P, D>(
+    initiator: usize,
+    target: usize,
+    card: Card,
+    player_hands: &mut [usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    revealed_cards: &mut Vec<Card>,
+    action: &Action,
+) -> Result<ChallengeState, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+{
     if target != action.player {
         return Err(Error::InvalidPlayer);
     }
@@ -791,10 +1106,18 @@ fn on_challenge_initial<P, D>(initiator: usize, target: usize, card: Card, playe
     }
 }
 
-fn on_challenge_shown_card<P>(initiator: usize, target: usize, player_hands: &mut [usize],
-                              player_cards_counter: &mut [usize], player_cards: &mut [P],
-                              revealed_cards: &mut Vec<Card>, action: &Action) -> Result<ChallengeState, Error>
-    where P: PlayerCards {
+fn on_challenge_shown_card<P>(
+    initiator: usize,
+    target: usize,
+    player_hands: &mut [usize],
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    revealed_cards: &mut Vec<Card>,
+    action: &Action,
+) -> Result<ChallengeState, Error>
+where
+    P: PlayerCards,
+{
     if initiator != action.player {
         return Err(Error::InvalidPlayer);
     }
@@ -813,10 +1136,16 @@ fn on_challenge_shown_card<P>(initiator: usize, target: usize, player_hands: &mu
     }
 }
 
-fn on_challenge_initiator_revealed_card<D, R>(target: usize, deck: &mut D, action: &Action,
-                                              rng: &mut R) -> Result<ChallengeState, Error>
-    where D: Deck,
-          R: Rng {
+fn on_challenge_initiator_revealed_card<D, R>(
+    target: usize,
+    deck: &mut D,
+    action: &Action,
+    rng: &mut R,
+) -> Result<ChallengeState, Error>
+where
+    D: Deck,
+    R: Rng,
+{
     if target != action.player {
         return Err(Error::InvalidPlayer);
     }
@@ -829,10 +1158,17 @@ fn on_challenge_initiator_revealed_card<D, R>(target: usize, deck: &mut D, actio
     }
 }
 
-fn on_challenge_deck_shuffled<P, D>(target: usize, player_cards_counter: &mut [usize], player_cards: &mut [P],
-                                    deck: &mut D, action: &Action) -> Result<ChallengeState, Error>
-    where P: PlayerCards,
-          D: Deck {
+fn on_challenge_deck_shuffled<P, D>(
+    target: usize,
+    player_cards_counter: &mut [usize],
+    player_cards: &mut [P],
+    deck: &mut D,
+    action: &Action,
+) -> Result<ChallengeState, Error>
+where
+    P: PlayerCards,
+    D: Deck,
+{
     if target != action.player {
         return Err(Error::InvalidPlayer);
     }
@@ -889,10 +1225,7 @@ mod tests {
                     vec![Card::Contessa, Card::Assassin],
                     vec![Card::Captain, Card::Ambassador],
                 ],
-                deck: vec![
-                    Card::Duke,
-                    Card::Contessa,
-                ],
+                deck: vec![Card::Duke, Card::Contessa],
                 revealed_cards: Vec::with_capacity(2 * 5),
             }
         }
@@ -915,7 +1248,10 @@ mod tests {
         let mut state = TestState::two_players();
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::Income },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Income
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -930,7 +1266,10 @@ mod tests {
         let mut state = TestState::two_players();
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::ForeignAid },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::ForeignAid
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -944,7 +1283,10 @@ mod tests {
         let mut state = TestState::two_players();
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::ForeignAid },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::ForeignAid
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -959,13 +1301,23 @@ mod tests {
         state.player_coins[0] = 3;
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::Assassinate(1) },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Assassinate(1)
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
             Ok(()),
         );
-        assert_eq!(state.state_type, StateType::Assassination { player: 0, target: 1, can_challenge: true });
+        assert_eq!(
+            state.state_type,
+            StateType::Assassination {
+                player: 0,
+                target: 1,
+                can_challenge: true
+            }
+        );
         assert_eq!(state.player_coins, vec![0, 2]);
     }
 
@@ -974,13 +1326,23 @@ mod tests {
         let mut state = TestState::two_players();
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::Steal(1) },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Steal(1)
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
             Ok(()),
         );
-        assert_eq!(state.state_type, StateType::Steal { player: 0, target: 1, can_challenge: true });
+        assert_eq!(
+            state.state_type,
+            StateType::Steal {
+                player: 0,
+                target: 1,
+                can_challenge: true
+            }
+        );
     }
 
     #[test]
@@ -989,13 +1351,22 @@ mod tests {
         state.player_coins[0] = 7;
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::Coup(1) },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Coup(1)
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
             Ok(()),
         );
-        assert_eq!(state.state_type, StateType::LostInfluence { player: 1, current_player: 0 });
+        assert_eq!(
+            state.state_type,
+            StateType::LostInfluence {
+                player: 1,
+                current_player: 0
+            }
+        );
         assert_eq!(state.player_coins[0], 0);
     }
 
@@ -1004,7 +1375,10 @@ mod tests {
         let mut state = TestState::two_players();
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::Exchange },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Exchange
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -1016,10 +1390,16 @@ mod tests {
     #[test]
     fn reveal_card_for_lost_influence_should_return_turn_for_next_player() {
         let mut state = TestState::two_players();
-        state.state_type = StateType::LostInfluence { player: 1, current_player: 0 };
+        state.state_type = StateType::LostInfluence {
+            player: 1,
+            current_player: 0,
+        };
         assert_eq!(
             play_action(
-                &Action { player: 1, action_type: ActionType::RevealCard(Card::Ambassador) },
+                &Action {
+                    player: 1,
+                    action_type: ActionType::RevealCard(Card::Ambassador)
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -1033,7 +1413,10 @@ mod tests {
         let mut state = TestState::two_players();
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::PassBlock },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::PassBlock
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -1048,7 +1431,10 @@ mod tests {
         state.state_type = StateType::Tax { player: 0 };
         assert_eq!(
             play_action(
-                &Action { player: 0, action_type: ActionType::BlockForeignAid },
+                &Action {
+                    player: 0,
+                    action_type: ActionType::BlockForeignAid
+                },
                 &mut state.state(),
                 &mut ConstRng,
             ),
@@ -1061,9 +1447,18 @@ mod tests {
     fn successfully_blocked_foreign_aid_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::ForeignAid },
-            Action { player: 1, action_type: ActionType::BlockForeignAid },
-            Action { player: 1, action_type: ActionType::PassChallenge },
+            Action {
+                player: 0,
+                action_type: ActionType::ForeignAid,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockForeignAid,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::PassChallenge,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1073,11 +1468,26 @@ mod tests {
     fn successfully_challenged_blocked_foreign_aid_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::ForeignAid },
-            Action { player: 1, action_type: ActionType::BlockForeignAid },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Duke) },
-            Action { player: 0, action_type: ActionType::PassBlock },
+            Action {
+                player: 0,
+                action_type: ActionType::ForeignAid,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockForeignAid,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Duke),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1088,14 +1498,38 @@ mod tests {
     fn block_foreign_aid_can_be_successfully_challenged_multiple_times() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::ForeignAid },
-            Action { player: 1, action_type: ActionType::BlockForeignAid },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Ambassador) },
-            Action { player: 2, action_type: ActionType::BlockForeignAid },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 2, action_type: ActionType::RevealCard(Card::Contessa) },
-            Action { player: 0, action_type: ActionType::PassBlock },
+            Action {
+                player: 0,
+                action_type: ActionType::ForeignAid,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockForeignAid,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Ambassador),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::BlockForeignAid,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::RevealCard(Card::Contessa),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1106,13 +1540,34 @@ mod tests {
     fn failed_on_challenge_blocked_foreign_aid_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::ForeignAid },
-            Action { player: 1, action_type: ActionType::BlockForeignAid },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::ShowCard(Card::Duke) },
-            Action { player: 2, action_type: ActionType::RevealCard(Card::Contessa) },
-            Action { player: 1, action_type: ActionType::ShuffleDeck },
-            Action { player: 1, action_type: ActionType::TakeCard },
+            Action {
+                player: 0,
+                action_type: ActionType::ForeignAid,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockForeignAid,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShowCard(Card::Duke),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::RevealCard(Card::Contessa),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1123,8 +1578,14 @@ mod tests {
     fn unchallenged_tax_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::Tax },
-            Action { player: 0, action_type: ActionType::PassChallenge },
+            Action {
+                player: 0,
+                action_type: ActionType::Tax,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1135,9 +1596,18 @@ mod tests {
     fn successfully_challenged_tax_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::Tax },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
+            Action {
+                player: 0,
+                action_type: ActionType::Tax,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1148,12 +1618,30 @@ mod tests {
         let mut state = TestState::four_players();
         state.state_type = StateType::Turn { player: 1 };
         let actions = [
-            Action { player: 1, action_type: ActionType::Tax },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::ShowCard(Card::Duke) },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
-            Action { player: 1, action_type: ActionType::ShuffleDeck },
-            Action { player: 1, action_type: ActionType::TakeCard },
+            Action {
+                player: 1,
+                action_type: ActionType::Tax,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShowCard(Card::Duke),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 2 });
@@ -1165,14 +1653,38 @@ mod tests {
         let mut state = TestState::four_players();
         state.player_coins[0] = 3;
         let actions = [
-            Action { player: 0, action_type: ActionType::Assassinate(2) },
-            Action { player: 0, action_type: ActionType::PassChallenge },
-            Action { player: 2, action_type: ActionType::BlockAssassination },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 2, action_type: ActionType::ShowCard(Card::Contessa) },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Ambassador) },
-            Action { player: 2, action_type: ActionType::ShuffleDeck },
-            Action { player: 2, action_type: ActionType::TakeCard },
+            Action {
+                player: 0,
+                action_type: ActionType::Assassinate(2),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::BlockAssassination,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::ShowCard(Card::Contessa),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Ambassador),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::TakeCard,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1184,16 +1696,46 @@ mod tests {
         let mut state = TestState::four_players();
         state.player_coins[0] = 3;
         let actions = [
-            Action { player: 0, action_type: ActionType::Assassinate(2) },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::ShowCard(Card::Assassin) },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::ShuffleDeck },
-            Action { player: 0, action_type: ActionType::TakeCard },
-            Action { player: 2, action_type: ActionType::BlockAssassination },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 2, action_type: ActionType::RevealCard(Card::Contessa) },
-            Action { player: 0, action_type: ActionType::PassBlock },
+            Action {
+                player: 0,
+                action_type: ActionType::Assassinate(2),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::BlockAssassination,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::RevealCard(Card::Contessa),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1204,14 +1746,38 @@ mod tests {
     fn steal_can_be_challenged_by_any_and_blocked_by_target_player() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::Steal(1) },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::ShowCard(Card::Captain) },
-            Action { player: 2, action_type: ActionType::RevealCard(Card::Contessa) },
-            Action { player: 0, action_type: ActionType::ShuffleDeck },
-            Action { player: 0, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::BlockSteal(Card::Ambassador) },
-            Action { player: 1, action_type: ActionType::PassChallenge },
+            Action {
+                player: 0,
+                action_type: ActionType::Steal(1),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Captain),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::RevealCard(Card::Contessa),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockSteal(Card::Ambassador),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::PassChallenge,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1222,9 +1788,18 @@ mod tests {
     fn successfully_challenged_steal_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::Steal(1) },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
+            Action {
+                player: 0,
+                action_type: ActionType::Steal(1),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1235,16 +1810,46 @@ mod tests {
     fn successful_steal_leads_to_next_turn() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::Steal(1) },
-            Action { player: 1, action_type: ActionType::Challenge },
-            Action { player: 0, action_type: ActionType::ShowCard(Card::Captain) },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::ShuffleDeck },
-            Action { player: 0, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::BlockSteal(Card::Captain) },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Duke) },
-            Action { player: 0, action_type: ActionType::PassBlock },
+            Action {
+                player: 0,
+                action_type: ActionType::Steal(1),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShowCard(Card::Captain),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockSteal(Card::Captain),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Duke),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassBlock,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 2 });
@@ -1255,17 +1860,50 @@ mod tests {
     fn block_steal_can_be_challenged_by_any_player() {
         let mut state = TestState::four_players();
         let actions = [
-            Action { player: 0, action_type: ActionType::Steal(1) },
-            Action { player: 0, action_type: ActionType::PassChallenge },
-            Action { player: 1, action_type: ActionType::BlockSteal(Card::Captain) },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::RevealCard(Card::Duke) },
-            Action { player: 1, action_type: ActionType::BlockSteal(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 0, action_type: ActionType::RevealCard(Card::Assassin) },
-            Action { player: 1, action_type: ActionType::ShuffleDeck },
-            Action { player: 1, action_type: ActionType::TakeCard },
+            Action {
+                player: 0,
+                action_type: ActionType::Steal(1),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::PassChallenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockSteal(Card::Captain),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::RevealCard(Card::Duke),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::BlockSteal(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 0,
+                action_type: ActionType::RevealCard(Card::Assassin),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 1 });
@@ -1277,16 +1915,46 @@ mod tests {
         let mut state = TestState::four_players();
         state.state_type = StateType::Turn { player: 1 };
         let actions = [
-            Action { player: 1, action_type: ActionType::Exchange },
-            Action { player: 2, action_type: ActionType::Challenge },
-            Action { player: 1, action_type: ActionType::ShowCard(Card::Ambassador) },
-            Action { player: 2, action_type: ActionType::RevealCard(Card::Contessa) },
-            Action { player: 1, action_type: ActionType::ShuffleDeck },
-            Action { player: 1, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::TakeCard },
-            Action { player: 1, action_type: ActionType::DropCard(Card::Contessa) },
-            Action { player: 1, action_type: ActionType::DropCard(Card::Duke) },
+            Action {
+                player: 1,
+                action_type: ActionType::Exchange,
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::Challenge,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShowCard(Card::Ambassador),
+            },
+            Action {
+                player: 2,
+                action_type: ActionType::RevealCard(Card::Contessa),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::ShuffleDeck,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::TakeCard,
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::DropCard(Card::Contessa),
+            },
+            Action {
+                player: 1,
+                action_type: ActionType::DropCard(Card::Duke),
+            },
         ];
         assert_eq!(play_actions(&mut state, &actions), Ok(()));
         assert_eq!(state.state_type, StateType::Turn { player: 0 });

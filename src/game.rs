@@ -1,11 +1,20 @@
 use itertools::Itertools;
-use rand::Rng;
 use rand::seq::SliceRandom;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::fsm::{Action, ActionType, ASSASSINATION_COST, Card, CARDS_PER_PLAYER, ChallengeState, COUP_COST, MAX_CARDS_TO_EXCHANGE, MAX_COINS, play_action, State, StateType};
+use crate::fsm::{
+    play_action, Action, ActionType, Card, ChallengeState, State, StateType, ASSASSINATION_COST,
+    CARDS_PER_PLAYER, COUP_COST, MAX_CARDS_TO_EXCHANGE, MAX_COINS,
+};
 
-pub const ALL_CARDS: [Card; 5] = [Card::Assassin, Card::Ambassador, Card::Captain, Card::Contessa, Card::Duke];
+pub const ALL_CARDS: [Card; 5] = [
+    Card::Assassin,
+    Card::Ambassador,
+    Card::Captain,
+    Card::Contessa,
+    Card::Duke,
+];
 pub const INITIAL_COINS: usize = 2;
 
 #[allow(dead_code)]
@@ -39,7 +48,11 @@ pub struct AnonymousView<'a> {
     pub deck: usize,
 }
 
-pub fn get_available_actions(state_type: &StateType, player_coins: &[usize], player_hands: &[usize]) -> Vec<Action> {
+pub fn get_available_actions(
+    state_type: &StateType,
+    player_coins: &[usize],
+    player_hands: &[usize],
+) -> Vec<Action> {
     match state_type {
         StateType::Turn { player } => {
             get_turn_available_actions(*player, player_coins, player_hands)
@@ -54,47 +67,73 @@ pub fn get_available_actions(state_type: &StateType, player_coins: &[usize], pla
         | StateType::BlockAssassination { player, .. } => {
             get_non_blocking_available_actions(*player, player_hands)
         }
-        StateType::Assassination { player, target, can_challenge } => {
-            get_assassination_available_actions(*player, *target, *can_challenge, player_hands)
-        }
-        StateType::Steal { player, target, can_challenge } => {
-            get_steal_available_actions(*player, *target, *can_challenge, player_hands)
-        }
+        StateType::Assassination {
+            player,
+            target,
+            can_challenge,
+        } => get_assassination_available_actions(*player, *target, *can_challenge, player_hands),
+        StateType::Steal {
+            player,
+            target,
+            can_challenge,
+        } => get_steal_available_actions(*player, *target, *can_challenge, player_hands),
         StateType::Challenge { state, .. } => get_challenge_available_actions(state),
         StateType::NeedCards { player, .. } => get_need_cards_available_actions(*player),
-        StateType::TookCards { player, .. }
-        | StateType::DroppedCard { player, .. } => {
+        StateType::TookCards { player, .. } | StateType::DroppedCard { player, .. } => {
             get_drop_card_actions(*player)
         }
-        StateType::LostInfluence { player, .. } => {
-            get_lost_influence_available_actions(*player)
-        }
+        StateType::LostInfluence { player, .. } => get_lost_influence_available_actions(*player),
     }
 }
 
-pub fn get_turn_available_actions(player: usize, player_coins: &[usize], player_hands: &[usize]) -> Vec<Action> {
+pub fn get_turn_available_actions(
+    player: usize,
+    player_coins: &[usize],
+    player_hands: &[usize],
+) -> Vec<Action> {
     if player_coins[player] >= MAX_COINS {
         let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
         for other_player in 0..player_hands.len() {
             if other_player != player && player_hands[other_player] > 0 {
-                actions.push(Action { player, action_type: ActionType::Coup(other_player) });
+                actions.push(Action {
+                    player,
+                    action_type: ActionType::Coup(other_player),
+                });
             }
         }
         return actions;
     }
-    let action_types = [ActionType::Income, ActionType::ForeignAid, ActionType::Tax, ActionType::Exchange];
-    let mut actions: Vec<Action> = Vec::with_capacity(action_types.len() + 3 * (player_hands.len() - 1));
+    let action_types = [
+        ActionType::Income,
+        ActionType::ForeignAid,
+        ActionType::Tax,
+        ActionType::Exchange,
+    ];
+    let mut actions: Vec<Action> =
+        Vec::with_capacity(action_types.len() + 3 * (player_hands.len() - 1));
     for action_type in action_types.iter().cloned() {
-        actions.push(Action { player, action_type });
+        actions.push(Action {
+            player,
+            action_type,
+        });
     }
     for other_player in 0..player_hands.len() {
         if other_player != player && player_hands[other_player] > 0 {
-            actions.push(Action { player, action_type: ActionType::Steal(other_player) });
+            actions.push(Action {
+                player,
+                action_type: ActionType::Steal(other_player),
+            });
             if player_coins[player] >= ASSASSINATION_COST {
-                actions.push(Action { player, action_type: ActionType::Assassinate(other_player) });
+                actions.push(Action {
+                    player,
+                    action_type: ActionType::Assassinate(other_player),
+                });
             }
             if player_coins[player] >= COUP_COST {
-                actions.push(Action { player, action_type: ActionType::Coup(other_player) });
+                actions.push(Action {
+                    player,
+                    action_type: ActionType::Coup(other_player),
+                });
             }
         }
     }
@@ -103,53 +142,95 @@ pub fn get_turn_available_actions(player: usize, player_coins: &[usize], player_
 
 pub fn get_foreign_aid_available_actions(player: usize, player_hands: &[usize]) -> Vec<Action> {
     let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
-    fill_actions(&ActionType::BlockForeignAid, player, player_hands, &mut actions);
-    actions.push(Action { player, action_type: ActionType::PassBlock });
+    fill_actions(
+        &ActionType::BlockForeignAid,
+        player,
+        player_hands,
+        &mut actions,
+    );
+    actions.push(Action {
+        player,
+        action_type: ActionType::PassBlock,
+    });
     actions
 }
 
 pub fn get_non_blocking_available_actions(player: usize, player_hands: &[usize]) -> Vec<Action> {
     let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
     fill_challenge_actions(player, player_hands, &mut actions);
-    actions.push(Action { player, action_type: ActionType::PassChallenge });
+    actions.push(Action {
+        player,
+        action_type: ActionType::PassChallenge,
+    });
     actions
 }
 
-pub fn get_assassination_available_actions(player: usize, target: usize, can_challenge: bool, player_hands: &[usize]) -> Vec<Action> {
+pub fn get_assassination_available_actions(
+    player: usize,
+    target: usize,
+    can_challenge: bool,
+    player_hands: &[usize],
+) -> Vec<Action> {
     if can_challenge {
         let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
         fill_challenge_actions(player, player_hands, &mut actions);
-        actions.push(Action { player, action_type: ActionType::PassChallenge });
+        actions.push(Action {
+            player,
+            action_type: ActionType::PassChallenge,
+        });
         actions
     } else {
         let mut actions = if player_hands[target] > 0 {
             let mut actions: Vec<Action> = Vec::with_capacity(2);
-            actions.push(Action { player: target, action_type: ActionType::BlockAssassination });
+            actions.push(Action {
+                player: target,
+                action_type: ActionType::BlockAssassination,
+            });
             actions
         } else {
             Vec::with_capacity(1)
         };
-        actions.push(Action { player, action_type: ActionType::PassBlock });
+        actions.push(Action {
+            player,
+            action_type: ActionType::PassBlock,
+        });
         actions
     }
 }
 
-pub fn get_steal_available_actions(player: usize, target: usize, can_challenge: bool, player_hands: &[usize]) -> Vec<Action> {
+pub fn get_steal_available_actions(
+    player: usize,
+    target: usize,
+    can_challenge: bool,
+    player_hands: &[usize],
+) -> Vec<Action> {
     if can_challenge {
         let mut actions: Vec<Action> = Vec::with_capacity(player_hands.len());
         fill_challenge_actions(player, player_hands, &mut actions);
-        actions.push(Action { player, action_type: ActionType::PassChallenge });
+        actions.push(Action {
+            player,
+            action_type: ActionType::PassChallenge,
+        });
         actions
     } else {
         let mut actions = if player_hands[target] > 0 {
             let mut actions: Vec<Action> = Vec::with_capacity(3);
-            actions.push(Action { player: target, action_type: ActionType::BlockSteal(Card::Ambassador) });
-            actions.push(Action { player: target, action_type: ActionType::BlockSteal(Card::Captain) });
+            actions.push(Action {
+                player: target,
+                action_type: ActionType::BlockSteal(Card::Ambassador),
+            });
+            actions.push(Action {
+                player: target,
+                action_type: ActionType::BlockSteal(Card::Captain),
+            });
             actions
         } else {
             Vec::with_capacity(1)
         };
-        actions.push(Action { player, action_type: ActionType::PassBlock });
+        actions.push(Action {
+            player,
+            action_type: ActionType::PassBlock,
+        });
         actions
     }
 }
@@ -181,23 +262,35 @@ pub fn get_challenge_available_actions(state: &ChallengeState) -> Vec<Action> {
             actions
         }
         ChallengeState::InitiatorRevealedCard { target } => {
-            vec![Action { player: *target, action_type: ActionType::ShuffleDeck }]
+            vec![Action {
+                player: *target,
+                action_type: ActionType::ShuffleDeck,
+            }]
         }
         ChallengeState::DeckShuffled { target } => {
-            vec![Action { player: *target, action_type: ActionType::TakeCard }]
+            vec![Action {
+                player: *target,
+                action_type: ActionType::TakeCard,
+            }]
         }
         _ => Vec::new(),
     }
 }
 
 fn get_need_cards_available_actions(player: usize) -> Vec<Action> {
-    vec![Action { player, action_type: ActionType::TakeCard }]
+    vec![Action {
+        player,
+        action_type: ActionType::TakeCard,
+    }]
 }
 
 fn get_drop_card_actions(player: usize) -> Vec<Action> {
     let mut actions: Vec<Action> = Vec::with_capacity(ALL_CARDS.len());
     for card in &ALL_CARDS {
-        actions.push(Action { player, action_type: ActionType::DropCard(*card) });
+        actions.push(Action {
+            player,
+            action_type: ActionType::DropCard(*card),
+        });
     }
     actions
 }
@@ -205,7 +298,10 @@ fn get_drop_card_actions(player: usize) -> Vec<Action> {
 fn get_lost_influence_available_actions(player: usize) -> Vec<Action> {
     let mut actions: Vec<Action> = Vec::with_capacity(ALL_CARDS.len());
     for card in &ALL_CARDS {
-        actions.push(Action { player, action_type: ActionType::RevealCard(*card) });
+        actions.push(Action {
+            player,
+            action_type: ActionType::RevealCard(*card),
+        });
     }
     actions
 }
@@ -214,15 +310,26 @@ fn fill_challenge_actions(target: usize, player_hands: &[usize], actions: &mut V
     fill_actions(&ActionType::Challenge, target, player_hands, actions);
 }
 
-fn fill_actions(action_type: &ActionType, target: usize, player_hands: &[usize], actions: &mut Vec<Action>) {
+fn fill_actions(
+    action_type: &ActionType,
+    target: usize,
+    player_hands: &[usize],
+    actions: &mut Vec<Action>,
+) {
     for player in target + 1..player_hands.len() {
         if player_hands[player] > 0 {
-            actions.push(Action { player, action_type: action_type.clone() });
+            actions.push(Action {
+                player,
+                action_type: action_type.clone(),
+            });
         }
     }
     for player in 0..target {
         if player_hands[player] > 0 {
-            actions.push(Action { player, action_type: action_type.clone() });
+            actions.push(Action {
+                player,
+                action_type: action_type.clone(),
+            });
         }
     }
 }
@@ -282,9 +389,15 @@ impl Game {
             round: 0,
             player: 0,
             state_type: StateType::Turn { player: 0 },
-            player_coins: std::iter::repeat(INITIAL_COINS).take(settings.players_number).collect(),
-            player_hands: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
-            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
+            player_coins: std::iter::repeat(INITIAL_COINS)
+                .take(settings.players_number)
+                .collect(),
+            player_hands: std::iter::repeat(CARDS_PER_PLAYER)
+                .take(settings.players_number)
+                .collect(),
+            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER)
+                .take(settings.players_number)
+                .collect(),
             player_cards,
             revealed_cards: Vec::with_capacity(settings.cards_per_type * ALL_CARDS.len()),
             deck,
@@ -302,9 +415,15 @@ impl Game {
             round: 0,
             player: 0,
             state_type: StateType::Turn { player: 0 },
-            player_coins: std::iter::repeat(INITIAL_COINS).take(player_cards.len()).collect(),
-            player_hands: std::iter::repeat(CARDS_PER_PLAYER).take(player_cards.len()).collect(),
-            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER).take(player_cards.len()).collect(),
+            player_coins: std::iter::repeat(INITIAL_COINS)
+                .take(player_cards.len())
+                .collect(),
+            player_hands: std::iter::repeat(CARDS_PER_PLAYER)
+                .take(player_cards.len())
+                .collect(),
+            player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER)
+                .take(player_cards.len())
+                .collect(),
             revealed_cards: Vec::with_capacity(CARDS_PER_PLAYER * player_cards.len() + deck.len()),
             player_cards,
             deck,
@@ -364,7 +483,8 @@ impl Game {
 
     pub fn get_winner(&self) -> Option<usize> {
         if self.is_done() {
-            self.player_hands.iter()
+            self.player_hands
+                .iter()
                 .find_position(|hand| **hand > 0)
                 .map(|(index, _)| index)
         } else {
@@ -397,7 +517,10 @@ impl Game {
     }
 
     pub fn print(&self) {
-        println!("Round: {}, turn: {}, step: {}", self.round, self.turn, self.step);
+        println!(
+            "Round: {}, turn: {}, step: {}",
+            self.round, self.turn, self.step
+        );
         println!("Done: {}", self.is_done());
         println!("Deck: {}", self.deck.len());
         for i in 0..self.deck.len() {
@@ -429,7 +552,10 @@ impl Game {
 }
 
 pub fn get_example_settings() -> Settings {
-    Settings { players_number: 6, cards_per_type: 3 }
+    Settings {
+        players_number: 6,
+        cards_per_type: 3,
+    }
 }
 
 pub fn get_example_actions() -> Vec<Action> {
@@ -975,12 +1101,21 @@ mod tests {
     #[test]
     fn income_should_add_coin_and_start_new_turn() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Income,
-            }, &mut rng),
+            game.play(
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Income,
+                },
+                &mut rng
+            ),
             Ok(())
         );
         assert_eq!(game.player_coins[0], 3);
@@ -989,7 +1124,13 @@ mod tests {
     #[test]
     fn unblocked_foreign_aid_should_add_coins() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1008,7 +1149,13 @@ mod tests {
     #[test]
     fn blocked_foreign_aid_should_not_add_coins() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1031,7 +1178,13 @@ mod tests {
     #[test]
     fn failed_challenge_on_block_foreign_aid_should_fail_foreign_aid() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1065,17 +1218,23 @@ mod tests {
         assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
         assert_eq!(game.state_type, StateType::Turn { player: 1 });
         assert_eq!(game.player_coins, vec![2, 2]);
-        assert_eq!(game.player_cards, vec![
-            vec![Card::Contessa],
-            vec![Card::Assassin, Card::Captain],
-        ]);
+        assert_eq!(
+            game.player_cards,
+            vec![vec![Card::Contessa], vec![Card::Assassin, Card::Captain],]
+        );
         assert_eq!(game.revealed_cards, vec![Card::Ambassador]);
     }
 
     #[test]
     fn successful_challenge_for_block_foreign_aid_should_allow_first_aid() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1101,17 +1260,23 @@ mod tests {
         assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
         assert_eq!(game.state_type, StateType::Turn { player: 1 });
         assert_eq!(game.player_coins, vec![4, 2]);
-        assert_eq!(game.player_cards, vec![
-            vec![Card::Ambassador, Card::Contessa],
-            vec![Card::Duke],
-        ]);
+        assert_eq!(
+            game.player_cards,
+            vec![vec![Card::Ambassador, Card::Contessa], vec![Card::Duke],]
+        );
         assert_eq!(game.revealed_cards, vec![Card::Captain]);
     }
 
     #[test]
     fn unchallenged_tax_should_add_coins() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1130,31 +1295,55 @@ mod tests {
     #[test]
     fn coup_should_subtract_coins_add_lead_to_lost_influence() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 7;
         assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Coup(1),
-            }, &mut rng),
+            game.play(
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Coup(1),
+                },
+                &mut rng
+            ),
             Ok(())
         );
-        assert_eq!(game.state_type, StateType::LostInfluence { player: 1, current_player: 0 });
+        assert_eq!(
+            game.state_type,
+            StateType::LostInfluence {
+                player: 1,
+                current_player: 0
+            }
+        );
         assert_eq!(game.player_coins[0], 0);
     }
 
     #[test]
     fn coup_against_not_active_player_should_return_error() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 7;
         game.player_hands[1] = 0;
         game.player_cards[1].clear();
         assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Coup(1),
-            }, &mut rng),
+            game.play(
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Coup(1),
+                },
+                &mut rng
+            ),
             Err(String::from("State machine check is failed: InvalidTarget"))
         );
         assert_eq!(game.state_type, StateType::Turn { player: 0 });
@@ -1163,7 +1352,13 @@ mod tests {
     #[test]
     fn block_steal_after_steal_should_add_counteraction() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1179,13 +1374,26 @@ mod tests {
             },
         ];
         assert_eq!(play_actions(&actions, &mut game, &mut rng), Ok(()));
-        assert_eq!(game.state_type, StateType::BlockSteal { player: 1, target: 0, card: Card::Ambassador });
+        assert_eq!(
+            game.state_type,
+            StateType::BlockSteal {
+                player: 1,
+                target: 0,
+                card: Card::Ambassador
+            }
+        );
     }
 
     #[test]
     fn block_steal_should_fail_for_non_targeted_player() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 3,
+                cards_per_type: 2,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1204,13 +1412,26 @@ mod tests {
             play_actions(&actions, &mut game, &mut rng),
             Err(String::from("State machine check is failed: InvalidTarget"))
         );
-        assert_eq!(game.state_type, StateType::Steal { player: 0, target: 1, can_challenge: false });
+        assert_eq!(
+            game.state_type,
+            StateType::Steal {
+                player: 0,
+                target: 1,
+                can_challenge: false
+            }
+        );
     }
 
     #[test]
     fn successful_challenged_block_steal_should_prevent_steal() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         game.player_cards[1][0] = Card::Ambassador;
         let actions = [
             Action {
@@ -1255,7 +1476,13 @@ mod tests {
     #[test]
     fn successful_steal_should_transfer_coins_from_target_to_theft() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1279,7 +1506,13 @@ mod tests {
     #[test]
     fn successful_steal_challenge_should_prevent_stealing() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1303,7 +1536,13 @@ mod tests {
     #[test]
     fn failed_steal_challenge_should_transfer_coins() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         game.player_cards[0][0] = Card::Captain;
         let actions = [
             Action {
@@ -1344,7 +1583,13 @@ mod tests {
     #[test]
     fn failed_steal_challenge_for_targeted_player_with_one_card_should_transfer_coins() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         game.player_cards[0][0] = Card::Captain;
         game.player_hands[1] = 1;
         game.player_cards_counter[1] = 1;
@@ -1391,13 +1636,22 @@ mod tests {
     #[test]
     fn assassinate_should_subtract_coins() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 3;
         assert_eq!(
-            game.play(&Action {
-                player: 0,
-                action_type: ActionType::Assassinate(1),
-            }, &mut rng),
+            game.play(
+                &Action {
+                    player: 0,
+                    action_type: ActionType::Assassinate(1),
+                },
+                &mut rng
+            ),
             Ok(())
         );
         assert_eq!(game.player_coins[0], 0);
@@ -1406,7 +1660,13 @@ mod tests {
     #[test]
     fn block_assassinate_should_fail_for_non_targeted_player() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 3,
+                cards_per_type: 2,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 3;
         let actions = [
             Action {
@@ -1431,7 +1691,13 @@ mod tests {
     #[test]
     fn failed_assassination_challenge_should_end_game_for_targeted_player() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 3,
+                cards_per_type: 2,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 3;
         game.player_cards[0][0] = Card::Assassin;
         let actions = [
@@ -1478,9 +1744,16 @@ mod tests {
     }
 
     #[test]
-    fn failed_assassination_challenge_for_targeted_player_with_one_card_should_not_allow_it_to_block() {
+    fn failed_assassination_challenge_for_targeted_player_with_one_card_should_not_allow_it_to_block(
+    ) {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 3,
+                cards_per_type: 2,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 3;
         game.player_cards[0][0] = Card::Assassin;
         game.player_hands[1] = 1;
@@ -1528,7 +1801,13 @@ mod tests {
     #[test]
     fn successful_exchange_should_replace_cards_with_deck() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 3, cards_per_type: 2 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 3,
+                cards_per_type: 2,
+            },
+            &mut rng,
+        );
         game.player_coins[0] = 3;
         game.player_cards[0][0] = Card::Assassin;
         let actions = [
@@ -1565,7 +1844,13 @@ mod tests {
     #[test]
     fn successful_challenge_for_exchange_should_prevent_exchange() {
         let mut rng = StdRng::seed_from_u64(42);
-        let mut game = Game::new(Settings { players_number: 2, cards_per_type: 1 }, &mut rng);
+        let mut game = Game::new(
+            Settings {
+                players_number: 2,
+                cards_per_type: 1,
+            },
+            &mut rng,
+        );
         let actions = [
             Action {
                 player: 0,
@@ -1597,19 +1882,36 @@ mod tests {
         assert_eq!(game.round(), 9);
     }
 
-    fn play_actions<R: Rng>(actions: &[Action], game: &mut Game, rng: &mut R) -> Result<(), String> {
+    fn play_actions<R: Rng>(
+        actions: &[Action],
+        game: &mut Game,
+        rng: &mut R,
+    ) -> Result<(), String> {
         for i in 0..actions.len() {
             let action = &actions[i];
             let view = game.get_player_view(action.player);
-            let available_actions = get_available_actions(&view.state_type, &view.player_coins, &view.player_hands);
+            let available_actions =
+                get_available_actions(&view.state_type, &view.player_coins, &view.player_hands);
             game.print();
             println!("Play {:?}", action);
             match game.play(action, rng) {
                 Ok(_) => {
-                    assert!(available_actions.contains(action), "{}) played action {:?} is not considered as available: {:?}", i, action, available_actions);
+                    assert!(
+                        available_actions.contains(action),
+                        "{}) played action {:?} is not considered as available: {:?}",
+                        i,
+                        action,
+                        available_actions
+                    );
                 }
                 Err(e) => {
-                    assert!(!available_actions.contains(action), "{}) failed action {:?} is considered as available: {:?}", i, action, available_actions);
+                    assert!(
+                        !available_actions.contains(action),
+                        "{}) failed action {:?} is considered as available: {:?}",
+                        i,
+                        action,
+                        available_actions
+                    );
                     return Err(e);
                 }
             }

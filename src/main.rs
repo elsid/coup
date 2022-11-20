@@ -6,23 +6,27 @@ use std::io::{BufRead, BufReader};
 
 use clap::Parser;
 use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::seq::SliceRandom;
+use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
-use crate::bots::{ActionView, Bot, CardsTracker, HonestCarefulRandomBot, is_allowed_action_type, RandomBot};
+use crate::bots::{
+    is_allowed_action_type, ActionView, Bot, CardsTracker, HonestCarefulRandomBot, RandomBot,
+};
 use crate::fsm::{Action, Card, StateType};
-use crate::game::{Game, get_available_actions, get_example_actions, get_example_settings, PlayerView, Settings};
+use crate::game::{
+    get_available_actions, get_example_actions, get_example_settings, Game, PlayerView, Settings,
+};
 use crate::interactive::run_interactive_game;
-use crate::run::{BotType, run_game_with_bots};
+use crate::run::{run_game_with_bots, BotType};
 use crate::stats::{collect_random_games_stats, print_stats};
 
-mod game;
 mod bots;
-mod stats;
-mod run;
 mod fsm;
+mod game;
 mod interactive;
+mod run;
+mod stats;
 
 #[derive(Parser)]
 struct Args {
@@ -126,12 +130,22 @@ fn simulate(params: SimulateParams) {
         players_number: params.players_number,
         cards_per_type: params.cards_per_type,
     };
-    run_game_with_bots(params.seed, &params.bot_types, settings, true, params.write_player);
+    run_game_with_bots(
+        params.seed,
+        &params.bot_types,
+        settings,
+        true,
+        params.write_player,
+    );
 }
 
 fn replay(params: ReplayParams) {
     if let Some(path) = params.file {
-        replay_from_file(BufReader::new(File::open(path).unwrap()), params.verbose, params.write_player);
+        replay_from_file(
+            BufReader::new(File::open(path).unwrap()),
+            params.verbose,
+            params.write_player,
+        );
     } else {
         replay_from_file(std::io::stdin().lock(), params.verbose, params.write_player);
     }
@@ -151,7 +165,10 @@ fn replay_from_file<F: BufRead>(mut file: F, verbose: bool, write_player: Option
     let mut game = Game::new(params.settings.clone(), &mut rng);
     if let Some(player) = write_player {
         println!("{}", serde_json::to_string(&params.settings).unwrap());
-        println!("{}", serde_json::to_string(&game.get_player_view(player)).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string(&game.get_player_view(player)).unwrap()
+        );
     }
     loop {
         let mut line = String::new();
@@ -171,7 +188,10 @@ fn replay_from_file<F: BufRead>(mut file: F, verbose: bool, write_player: Option
         }
         assert_eq!(game.play(&action, &mut rng), Ok(()));
         if let Some(player) = write_player {
-            println!("{}", serde_json::to_string(&game.get_player_view(player)).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string(&game.get_player_view(player)).unwrap()
+            );
         }
     }
     if verbose {
@@ -184,12 +204,21 @@ fn stats(params: StatsParams) {
         players_number: params.players_number,
         cards_per_type: params.cards_per_type,
     };
-    print_stats(&collect_random_games_stats(params.seed, params.games, params.workers, params.bot_types, settings));
+    print_stats(&collect_random_games_stats(
+        params.seed,
+        params.games,
+        params.workers,
+        params.bot_types,
+        settings,
+    ));
 }
 
 fn example() {
     let settings = get_example_settings();
-    println!("{}", serde_json::to_string(&GameParams { seed: 42, settings }).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string(&GameParams { seed: 42, settings }).unwrap()
+    );
     for action in get_example_actions() {
         println!("{}", serde_json::to_string(&action).unwrap());
     }
@@ -217,7 +246,10 @@ fn track_from_file<F: BufRead>(mut file: F) {
                 if view.player == action.player {
                     tracker.after_player_action(&view.player_view(), &action);
                 } else {
-                    tracker.after_opponent_action(&view.player_view(), &ActionView::from_action(&action));
+                    tracker.after_opponent_action(
+                        &view.player_view(),
+                        &ActionView::from_action(&action),
+                    );
                 }
             } else {
                 break;
@@ -256,10 +288,17 @@ fn suggest_from_file<F: BufRead>(bot_type: BotType, mut file: F) {
 
 fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: GameView, mut file: F, mut bot: B) {
     let initial_player_view = initial_view.player_view();
-    let available_actions: Vec<Action> = get_available_actions(initial_player_view.state_type, initial_player_view.player_coins, initial_player_view.player_hands).into_iter()
-        .filter(|action| action.player == initial_view.player)
-        .collect();
-    let mut suggested_actions: Vec<Action> = bot.suggest_actions(&initial_player_view, &available_actions).iter()
+    let available_actions: Vec<Action> = get_available_actions(
+        initial_player_view.state_type,
+        initial_player_view.player_coins,
+        initial_player_view.player_hands,
+    )
+    .into_iter()
+    .filter(|action| action.player == initial_view.player)
+    .collect();
+    let mut suggested_actions: Vec<Action> = bot
+        .suggest_actions(&initial_player_view, &available_actions)
+        .iter()
         .map(|v| (*v).clone())
         .collect();
     let mut last_view = initial_view;
@@ -270,10 +309,14 @@ fn suggest_from_file_with_bot<F: BufRead, B: Bot>(initial_view: GameView, mut fi
             } else {
                 bot.after_opponent_action(&view.player_view(), &ActionView::from_action(&action));
             }
-            let available_actions: Vec<Action> = get_available_actions(&view.state_type, &view.player_coins, &view.player_hands).into_iter()
-                .filter(|action| action.player == view.player)
-                .collect();
-            suggested_actions = bot.suggest_actions(&view.player_view(), &available_actions).iter()
+            let available_actions: Vec<Action> =
+                get_available_actions(&view.state_type, &view.player_coins, &view.player_hands)
+                    .into_iter()
+                    .filter(|action| action.player == view.player)
+                    .collect();
+            suggested_actions = bot
+                .suggest_actions(&view.player_view(), &available_actions)
+                .iter()
                 .map(|v| (*v).clone())
                 .collect();
             last_view = view;
@@ -351,9 +394,16 @@ fn fuzzy(params: FuzzyParams) {
         let mut game = Game::new(settings.clone(), &mut rng);
         while !game.is_done() {
             let view = game.get_anonymous_view();
-            let available_actions = get_available_actions(view.state_type, view.player_coins, view.player_hands);
-            let mut allowed_actions: Vec<Action> = available_actions.iter()
-                .filter(|action| is_allowed_action_type(&action.action_type, game.get_player_view(action.player).cards))
+            let available_actions =
+                get_available_actions(view.state_type, view.player_coins, view.player_hands);
+            let mut allowed_actions: Vec<Action> = available_actions
+                .iter()
+                .filter(|action| {
+                    is_allowed_action_type(
+                        &action.action_type,
+                        game.get_player_view(action.player).cards,
+                    )
+                })
                 .cloned()
                 .collect();
             if allowed_actions.is_empty() {
@@ -365,7 +415,10 @@ fn fuzzy(params: FuzzyParams) {
                 panic!("No allowed actions");
             }
             for action in available_actions {
-                if is_allowed_action_type(&action.action_type, game.get_player_view(action.player).cards) {
+                if is_allowed_action_type(
+                    &action.action_type,
+                    game.get_player_view(action.player).cards,
+                ) {
                     continue;
                 }
                 if let Ok(()) = game.play(&action, &mut rng) {

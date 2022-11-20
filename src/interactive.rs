@@ -7,8 +7,11 @@ use rand::Rng;
 use scan_fmt::parse::ScanError;
 
 use crate::bots::{ActionView, Bot, HonestCarefulRandomBot, RandomBot};
-use crate::fsm::{Action, ActionType, Card, CARDS_PER_PLAYER, ConstRng, Deck, play_action, PlayerCards, State, StateType};
-use crate::game::{ALL_CARDS, get_available_actions, INITIAL_COINS, PlayerView, Settings};
+use crate::fsm::{
+    play_action, Action, ActionType, Card, ConstRng, Deck, PlayerCards, State, StateType,
+    CARDS_PER_PLAYER,
+};
+use crate::game::{get_available_actions, PlayerView, Settings, ALL_CARDS, INITIAL_COINS};
 use crate::run::BotType;
 
 #[derive(Debug)]
@@ -16,10 +19,7 @@ enum Command {
     Help,
     Quit,
     Set(SetCommand),
-    NamePlayer {
-        index: usize,
-        name: String,
-    },
+    NamePlayer { index: usize, name: String },
     Add(Card),
     Remove(Card),
     Start,
@@ -89,17 +89,18 @@ pub fn run_interactive_game() {
         match read_command() {
             Command::Help => println!("{}", HELP),
             Command::Quit => break,
-            Command::Set(set) => {
-                match set {
-                    SetCommand::PlayersNumber(v) => settings.players_number = v,
-                    SetCommand::CardsPerType(v) => settings.cards_per_type = v,
-                    SetCommand::BotType(v) => bot_type = v,
-                    SetCommand::PlayerIndex(v) => player_index = v,
-                }
-            }
+            Command::Set(set) => match set {
+                SetCommand::PlayersNumber(v) => settings.players_number = v,
+                SetCommand::CardsPerType(v) => settings.cards_per_type = v,
+                SetCommand::BotType(v) => bot_type = v,
+                SetCommand::PlayerIndex(v) => player_index = v,
+            },
             Command::NamePlayer { index, name } => {
                 if index >= settings.players_number {
-                    println!("Player index is not applicable for current number of players: {}", settings.players_number);
+                    println!(
+                        "Player index is not applicable for current number of players: {}",
+                        settings.players_number
+                    );
                     continue;
                 }
                 custom_player_names.insert(index, name);
@@ -116,7 +117,8 @@ pub fn run_interactive_game() {
                     println!("Can't add more than {} cards", CARDS_PER_PLAYER);
                     continue;
                 }
-                let index = player_cards.iter()
+                let index = player_cards
+                    .iter()
                     .find_position(|v| **v == card)
                     .map(|(i, _)| i);
                 if let Some(index) = index {
@@ -127,10 +129,15 @@ pub fn run_interactive_game() {
             }
             Command::Start => {
                 if player_cards.len() != CARDS_PER_PLAYER {
-                    println!("Need to add {} more card(s)", CARDS_PER_PLAYER - player_cards.len());
+                    println!(
+                        "Need to add {} more card(s)",
+                        CARDS_PER_PLAYER - player_cards.len()
+                    );
                     continue;
                 }
-                if settings.cards_per_type * ALL_CARDS.len() < settings.players_number * CARDS_PER_PLAYER {
+                if settings.cards_per_type * ALL_CARDS.len()
+                    < settings.players_number * CARDS_PER_PLAYER
+                {
                     println!(
                         "Not enough cards for all players: need at least {} cards per type for {} players",
                         (settings.players_number * CARDS_PER_PLAYER) / ALL_CARDS.len(),
@@ -138,7 +145,8 @@ pub fn run_interactive_game() {
                     );
                     continue;
                 }
-                let game_state = make_initial_game_state(&settings, player_index, player_cards.clone());
+                let game_state =
+                    make_initial_game_state(&settings, player_index, player_cards.clone());
                 let player_names: Vec<String> = (0..settings.players_number)
                     .map(|index| {
                         if let Some(v) = custom_player_names.get(&index) {
@@ -199,8 +207,8 @@ fn parse_command(line: &str) -> Result<Command, ScanError> {
     match name.as_str() {
         "help" => Ok(Command::Help),
         "quit" => Ok(Command::Quit),
-        "set" => {
-            Ok(Command::Set(match scan_fmt!(line, "set {}", String)?.as_str() {
+        "set" => Ok(Command::Set(
+            match scan_fmt!(line, "set {}", String)?.as_str() {
                 "players_number" => {
                     SetCommand::PlayersNumber(scan_fmt!(line, "set players_number {d}", usize)?)
                 }
@@ -210,12 +218,10 @@ fn parse_command(line: &str) -> Result<Command, ScanError> {
                 "bot_type" => {
                     SetCommand::BotType(scan(scan_fmt!(line, "set bot_type {}", String)?)?)
                 }
-                "player" => {
-                    SetCommand::PlayerIndex(scan_fmt!(line, "set player {}", usize)?)
-                }
+                "player" => SetCommand::PlayerIndex(scan_fmt!(line, "set player {}", usize)?),
                 v => return Err(ScanError(format!("invalid set command param: {}", v))),
-            }))
-        }
+            },
+        )),
         "name" => {
             let (index, name) = scan_fmt!(line, "name {d} {}", usize, String)?;
             Ok(Command::NamePlayer { index, name })
@@ -231,7 +237,9 @@ fn parse_command(line: &str) -> Result<Command, ScanError> {
                 "coup" => GameActionType::Coup(scan_fmt!(sub, "coup {}", String)?),
                 "foreign_aid" | "aid" => GameActionType::ForeignAid,
                 "tax" => GameActionType::Tax,
-                "assassinate" => GameActionType::Assassinate(scan_fmt!(sub, "assassinate {}", String)?),
+                "assassinate" => {
+                    GameActionType::Assassinate(scan_fmt!(sub, "assassinate {}", String)?)
+                }
                 "kill" => GameActionType::Assassinate(scan_fmt!(sub, "kill {}", String)?),
                 "exchange" => GameActionType::Exchange,
                 "steal" => GameActionType::Steal(scan_fmt!(sub, "steal {}", String)?),
@@ -246,25 +254,29 @@ fn parse_command(line: &str) -> Result<Command, ScanError> {
                 "shuffle" => GameActionType::ShuffleDeck,
                 v => return Err(ScanError(format!("invalid action type: {}", v))),
             };
-            Ok(Command::Play(GameAction { player, action_type }))
+            Ok(Command::Play(GameAction {
+                player,
+                action_type,
+            }))
         }
         "undo" => Ok(Command::Undo),
         "state" => Ok(Command::State),
         "available" => Ok(Command::Available),
-        "bot" => {
-            Ok(Command::Bot(match scan_fmt!(line, "bot {}", String)?.as_str() {
+        "bot" => Ok(Command::Bot(
+            match scan_fmt!(line, "bot {}", String)?.as_str() {
                 "suggest" => BotCommand::SuggestActions,
                 "get" => BotCommand::GetAction,
                 "custom" => BotCommand::Custom(get_tail(name.len(), get_tail(3, &line)).into()),
                 v => return Err(ScanError(format!("invalid bot command: {}", v))),
-            }))
-        }
+            },
+        )),
         v => Err(ScanError(format!("invalid command name: {}", v))),
     }
 }
 
 fn get_tail(skip: usize, line: &str) -> &str {
-    let spaces = line.bytes()
+    let spaces = line
+        .bytes()
         .skip(skip)
         .find_position(|v| *v != b' ')
         .map(|(i, _)| i)
@@ -283,12 +295,21 @@ fn make_initial_game_state(settings: &Settings, player: usize, cards: Vec<Card>)
         round: 0,
         player,
         state_type: StateType::Turn { player: 0 },
-        player_coins: std::iter::repeat(INITIAL_COINS).take(settings.players_number).collect(),
-        player_hands: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
-        player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER).take(settings.players_number).collect(),
+        player_coins: std::iter::repeat(INITIAL_COINS)
+            .take(settings.players_number)
+            .collect(),
+        player_hands: std::iter::repeat(CARDS_PER_PLAYER)
+            .take(settings.players_number)
+            .collect(),
+        player_cards_counter: std::iter::repeat(CARDS_PER_PLAYER)
+            .take(settings.players_number)
+            .collect(),
         player_cards,
         revealed_cards: Vec::with_capacity(settings.cards_per_type * ALL_CARDS.len()),
-        deck: GameDeck { size: settings.cards_per_type * ALL_CARDS.len() - CARDS_PER_PLAYER * settings.players_number },
+        deck: GameDeck {
+            size: settings.cards_per_type * ALL_CARDS.len()
+                - CARDS_PER_PLAYER * settings.players_number,
+        },
     }
 }
 
@@ -318,7 +339,10 @@ impl GameState {
             cards: if let GamePlayerCards::Player(cards) = &self.player_cards[self.player] {
                 cards
             } else {
-                panic!("Invalid player cards kind: {:?}", self.player_cards[self.player]);
+                panic!(
+                    "Invalid player cards kind: {:?}",
+                    self.player_cards[self.player]
+                );
             },
             state_type: &self.state_type,
             player_coins: &self.player_coins,
@@ -330,7 +354,9 @@ impl GameState {
     }
 
     fn with_default<F>(&mut self, mut f: F) -> Result<(), String>
-        where F: FnMut(&mut State<GamePlayerCards, GameDeck>) -> Result<(), String> {
+    where
+        F: FnMut(&mut State<GamePlayerCards, GameDeck>) -> Result<(), String>,
+    {
         f(&mut State {
             state_type: &mut self.state_type,
             player_coins: &mut self.player_coins,
@@ -345,14 +371,19 @@ impl GameState {
     }
 
     fn with_pop_deck<F>(&mut self, card: Card, mut f: F) -> Result<(), String>
-        where F: FnMut(&mut State<GamePlayerCards, PopGameDeck>) -> Result<(), String> {
+    where
+        F: FnMut(&mut State<GamePlayerCards, PopGameDeck>) -> Result<(), String>,
+    {
         f(&mut State {
             state_type: &mut self.state_type,
             player_coins: &mut self.player_coins,
             player_hands: &mut self.player_hands,
             player_cards_counter: &mut self.player_cards_counter,
             player_cards: &mut self.player_cards,
-            deck: &mut PopGameDeck { deck: &mut self.deck, card },
+            deck: &mut PopGameDeck {
+                deck: &mut self.deck,
+                card,
+            },
             revealed_cards: &mut self.revealed_cards,
         })?;
         self.advance();
@@ -415,9 +446,13 @@ struct GameDeck {
 }
 
 impl Deck for GameDeck {
-    fn count(&self) -> usize { self.size }
+    fn count(&self) -> usize {
+        self.size
+    }
 
-    fn pop_card(&mut self) -> Card { unimplemented!() }
+    fn pop_card(&mut self) -> Card {
+        unimplemented!()
+    }
 
     fn push_card(&mut self, _: Card) {
         self.size += 1;
@@ -432,19 +467,27 @@ struct PopGameDeck<'a> {
 }
 
 impl<'a> Deck for PopGameDeck<'a> {
-    fn count(&self) -> usize { self.deck.size }
+    fn count(&self) -> usize {
+        self.deck.size
+    }
 
     fn pop_card(&mut self) -> Card {
         self.deck.size -= 1;
         self.card
     }
 
-    fn push_card(&mut self, _: Card) { unimplemented!() }
+    fn push_card(&mut self, _: Card) {
+        unimplemented!()
+    }
 
     fn shuffle<R: Rng>(&mut self, _: &mut R) {}
 }
 
-fn interactive_with_bot<B: Bot + Sized + Clone>(player_names: &[String], mut game_state: GameState, mut bot: B) {
+fn interactive_with_bot<B: Bot + Sized + Clone>(
+    player_names: &[String],
+    mut game_state: GameState,
+    mut bot: B,
+) {
     let mut history: Vec<(GameState, B)> = Vec::new();
     loop {
         match read_command() {
@@ -452,7 +495,9 @@ fn interactive_with_bot<B: Bot + Sized + Clone>(player_names: &[String], mut gam
             Command::Quit => break,
             Command::Play(game_action) => {
                 history.push((game_state.clone(), bot.clone()));
-                if let Err(e) = handle_game_action(&game_action, player_names, &mut game_state, &mut bot) {
+                if let Err(e) =
+                    handle_game_action(&game_action, player_names, &mut game_state, &mut bot)
+                {
                     println!("{}", e);
                     continue;
                 }
@@ -467,18 +512,29 @@ fn interactive_with_bot<B: Bot + Sized + Clone>(player_names: &[String], mut gam
             }
             Command::State => print_state(&game_state, player_names),
             Command::Available => {
-                let available_actions = get_available_actions(&game_state.state_type, &game_state.player_coins, &game_state.player_hands);
+                let available_actions = get_available_actions(
+                    &game_state.state_type,
+                    &game_state.player_coins,
+                    &game_state.player_hands,
+                );
                 for action in available_actions {
                     println!("{}", to_game_command(&action, player_names));
                 }
             }
             Command::Bot(bot_command) => {
-                let available_actions = get_available_actions(&game_state.state_type, &game_state.player_coins, &game_state.player_hands).into_iter()
-                    .filter(|action| action.player == game_state.player)
-                    .collect();
+                let available_actions = get_available_actions(
+                    &game_state.state_type,
+                    &game_state.player_coins,
+                    &game_state.player_hands,
+                )
+                .into_iter()
+                .filter(|action| action.player == game_state.player)
+                .collect();
                 match bot_command {
                     BotCommand::SuggestActions => {
-                        for action in bot.suggest_actions(&game_state.player_view(), &available_actions) {
+                        for action in
+                            bot.suggest_actions(&game_state.player_view(), &available_actions)
+                        {
                             println!("{}", to_game_command(action, player_names));
                         }
                     }
@@ -494,30 +550,29 @@ fn interactive_with_bot<B: Bot + Sized + Clone>(player_names: &[String], mut gam
     }
 }
 
-fn handle_game_action<B: Bot>(game_action: &GameAction, player_names: &[String], game_state: &mut GameState, bot: &mut B) -> Result<(), String> {
+fn handle_game_action<B: Bot>(
+    game_action: &GameAction,
+    player_names: &[String],
+    game_state: &mut GameState,
+    bot: &mut B,
+) -> Result<(), String> {
     let player = get_player_index(&game_action.player, &player_names)?;
     let action_type = match &game_action.action_type {
         GameActionType::Income => ActionType::Income,
         GameActionType::ForeignAid => ActionType::ForeignAid,
-        GameActionType::Coup(target) => {
-            ActionType::Coup(get_player_index(target, player_names)?)
-        }
+        GameActionType::Coup(target) => ActionType::Coup(get_player_index(target, player_names)?),
         GameActionType::Tax => ActionType::Tax,
         GameActionType::Assassinate(target) => {
             ActionType::Assassinate(get_player_index(target, player_names)?)
         }
         GameActionType::Exchange => ActionType::Exchange,
-        GameActionType::Steal(target) => {
-            ActionType::Steal(get_player_index(target, player_names)?)
-        }
-        GameActionType::Block(card) => {
-            match card {
-                Card::Duke => ActionType::BlockForeignAid,
-                Card::Contessa => ActionType::BlockAssassination,
-                Card::Ambassador | Card::Captain => ActionType::BlockSteal(*card),
-                _ => return Err(format!("invalid card to block: {:?}", card))
-            }
-        }
+        GameActionType::Steal(target) => ActionType::Steal(get_player_index(target, player_names)?),
+        GameActionType::Block(card) => match card {
+            Card::Duke => ActionType::BlockForeignAid,
+            Card::Contessa => ActionType::BlockAssassination,
+            Card::Ambassador | Card::Captain => ActionType::BlockSteal(*card),
+            _ => return Err(format!("invalid card to block: {:?}", card)),
+        },
         GameActionType::PassChallenge => ActionType::PassChallenge,
         GameActionType::PassBlock => ActionType::PassBlock,
         GameActionType::Challenge => ActionType::Challenge,
@@ -529,17 +584,26 @@ fn handle_game_action<B: Bot>(game_action: &GameAction, player_names: &[String],
             if player == game_state.player && matches!(card, Card::Unknown) {
                 return Err(String::from("Player can't take unknown card"));
             }
-            let action = Action { player, action_type: ActionType::TakeCard };
+            let action = Action {
+                player,
+                action_type: ActionType::TakeCard,
+            };
             game_state.with_pop_deck(*card, |state| play(&action, state))?;
             if game_state.player == action.player {
                 bot.after_player_action(&game_state.player_view(), &action);
             } else {
-                bot.after_opponent_action(&game_state.player_view(), &ActionView::from_action(&action));
+                bot.after_opponent_action(
+                    &game_state.player_view(),
+                    &ActionView::from_action(&action),
+                );
             }
             return Ok(());
         }
     };
-    let action = Action { player, action_type };
+    let action = Action {
+        player,
+        action_type,
+    };
     game_state.with_default(|state| play(&action, state))?;
     if game_state.player == action.player {
         bot.after_player_action(&game_state.player_view(), &action);
@@ -549,7 +613,10 @@ fn handle_game_action<B: Bot>(game_action: &GameAction, player_names: &[String],
     Ok(())
 }
 
-fn play<'a, P: PlayerCards + Sized, D: Deck>(action: &Action, state: &mut State<'a, P, D>) -> Result<(), String> {
+fn play<'a, P: PlayerCards + Sized, D: Deck>(
+    action: &Action,
+    state: &mut State<'a, P, D>,
+) -> Result<(), String> {
     if let Err(e) = play_action(action, state, &mut ConstRng) {
         Err(format!("Failed to play action: {:?}", e))
     } else {
@@ -558,7 +625,8 @@ fn play<'a, P: PlayerCards + Sized, D: Deck>(action: &Action, state: &mut State<
 }
 
 fn get_player_index(name: &String, player_names: &[String]) -> Result<usize, String> {
-    player_names.iter()
+    player_names
+        .iter()
         .find_position(|v| **v == *name)
         .map(|(i, _)| Ok(i))
         .unwrap_or_else(|| Err(format!("invalid player name: {}", name)))
@@ -568,26 +636,51 @@ fn to_game_command(action: &Action, player_names: &[String]) -> String {
     match &action.action_type {
         ActionType::Income => format!("play {} income", player_names[action.player]),
         ActionType::ForeignAid => format!("play {} foreign_aid", player_names[action.player]),
-        ActionType::Coup(target) => format!("play {} coup {}", player_names[action.player], player_names[*target]),
+        ActionType::Coup(target) => format!(
+            "play {} coup {}",
+            player_names[action.player], player_names[*target]
+        ),
         ActionType::Tax => format!("play {} tax", player_names[action.player]),
-        ActionType::Assassinate(target) => format!("play {} assassinate {}", player_names[action.player], player_names[*target]),
+        ActionType::Assassinate(target) => format!(
+            "play {} assassinate {}",
+            player_names[action.player], player_names[*target]
+        ),
         ActionType::Exchange => format!("play {} exchange", player_names[action.player]),
-        ActionType::Steal(target) => format!("play {} steal {}", player_names[action.player], player_names[*target]),
-        ActionType::BlockForeignAid => format!("play {} block {:?}", player_names[action.player], Card::Duke),
-        ActionType::BlockAssassination => format!("play {} block {:?}", player_names[action.player], Card::Contessa),
-        ActionType::BlockSteal(card) => format!("play {} block {:?}", player_names[action.player], *card),
+        ActionType::Steal(target) => format!(
+            "play {} steal {}",
+            player_names[action.player], player_names[*target]
+        ),
+        ActionType::BlockForeignAid => format!(
+            "play {} block {:?}",
+            player_names[action.player],
+            Card::Duke
+        ),
+        ActionType::BlockAssassination => format!(
+            "play {} block {:?}",
+            player_names[action.player],
+            Card::Contessa
+        ),
+        ActionType::BlockSteal(card) => {
+            format!("play {} block {:?}", player_names[action.player], *card)
+        }
         ActionType::PassChallenge => format!("play {} pass_challenge", player_names[action.player]),
         ActionType::PassBlock => format!("play {} pass_block", player_names[action.player]),
         ActionType::Challenge => format!("play {} challenge", player_names[action.player]),
-        ActionType::ShowCard(card) => format!("play {} show {:?}", player_names[action.player], *card),
-        ActionType::RevealCard(card) => format!("play {} reveal {:?}", player_names[action.player], *card),
-        ActionType::DropCard(card) => format!("play {} drop {:?}", player_names[action.player], *card),
+        ActionType::ShowCard(card) => {
+            format!("play {} show {:?}", player_names[action.player], *card)
+        }
+        ActionType::RevealCard(card) => {
+            format!("play {} reveal {:?}", player_names[action.player], *card)
+        }
+        ActionType::DropCard(card) => {
+            format!("play {} drop {:?}", player_names[action.player], *card)
+        }
         ActionType::TakeCard => format!("play {} take card", player_names[action.player]),
         ActionType::ShuffleDeck => format!("play {} shuffle", player_names[action.player]),
     }
 }
 
-fn scan<T: FromStr<Err=String>>(value: String) -> Result<T, ScanError> {
+fn scan<T: FromStr<Err = String>>(value: String) -> Result<T, ScanError> {
     match T::from_str(&value) {
         Ok(v) => Ok(v),
         Err(e) => Err(ScanError(e)),
@@ -603,7 +696,10 @@ fn print_state(game_state: &GameState, player_names: &[String]) {
     println!("deck size: {}", game_state.deck.size);
     println!("players:");
     for i in 0..player_names.len() {
-        print!("{}) {} coins={} ", i, player_names[i], game_state.player_coins[i]);
+        print!(
+            "{}) {} coins={} ",
+            i, player_names[i], game_state.player_coins[i]
+        );
         match &game_state.player_cards[i] {
             GamePlayerCards::Player(cards) => println!("cards={:?}", cards),
             GamePlayerCards::Opponent(count) => println!("cards={}", count),
